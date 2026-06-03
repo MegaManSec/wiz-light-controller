@@ -99,8 +99,13 @@ public final class WizCore {
   }
 
   /// Build the `setPilot` params for a desired state (`{ state: false }` when off).
-  public func buildSetPilotParams(_ state: LightState, bounds: [String: Any] = [:]) -> [String: Any] {
-    call("buildSetPilotParams", [state.jsObject, bounds]).toDictionary() as? [String: Any] ?? [:]
+  /// `whiteMix` (RGB only) routes a colour's achromatic part to the bulb's bright
+  /// white channels (`c`/`w`) — brighter, slightly less saturated; see model.js.
+  public func buildSetPilotParams(
+    _ state: LightState, bounds: [String: Any] = [:], whiteMix: Bool = false
+  ) -> [String: Any] {
+    call("buildSetPilotParams", [state.jsObject, bounds, ["whiteMix": whiteMix]])
+      .toDictionary() as? [String: Any] ?? [:]
   }
 
   /// Per-device send bounds parsed from a `getModelConfig` result, via the shared

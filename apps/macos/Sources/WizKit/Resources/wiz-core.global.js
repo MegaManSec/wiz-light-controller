@@ -47,6 +47,7 @@ var WizCore = (() => {
     parsePilot: () => parsePilot,
     rgbToHex: () => rgbToHex,
     rgbToHsv: () => rgbToHsv,
+    rgbToWhiteMixed: () => rgbToWhiteMixed,
     stateMatchesPreset: () => stateMatchesPreset,
     toDimming: () => toDimming,
     warmGlowKelvin: () => warmGlowKelvin,
@@ -195,7 +196,7 @@ var WizCore = (() => {
     }
     return { on, mode: "rgb", rgb: DEFAULT_STATE.rgb, temp: DEFAULT_STATE.temp, brightness };
   }
-  function buildSetPilotParams(state, bounds = {}) {
+  function buildSetPilotParams(state, bounds = {}, { whiteMix = false } = {}) {
     if (!state.on) return { state: false };
     const dimMin = bounds.dimMin ?? DIMMING_MIN;
     const tempMin = bounds.tempMin ?? TEMP_MIN;
@@ -203,11 +204,17 @@ var WizCore = (() => {
     const params = { state: true, dimming: clampInt(state.brightness, dimMin, DIMMING_MAX) };
     if (state.mode === "white") {
       params.temp = clampInt(state.temp, tempMin, tempMax);
+    } else if (whiteMix) {
+      Object.assign(params, rgbToWhiteMixed(clampRgb(state.rgb)));
     } else {
       const [r, g, b] = clampRgb(state.rgb);
       Object.assign(params, { r, g, b });
     }
     return params;
+  }
+  function rgbToWhiteMixed([r, g, b]) {
+    const white = Math.min(r, g, b);
+    return { r: r - white, g: g - white, b: b - white, c: white, w: white };
   }
   function deviceBoundsFromConfig(modelConfig) {
     const bounds = {};

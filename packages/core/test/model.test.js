@@ -4,6 +4,7 @@ import {
   DEFAULT_STATE,
   parsePilot,
   buildSetPilotParams,
+  rgbToWhiteMixed,
   deviceBoundsFromConfig,
   describeDevice,
   dimToWarmCurveFromConfig,
@@ -170,6 +171,43 @@ describe('model: buildSetPilotParams', () => {
     const p = buildSetPilotParams(dim, { dimMin: 20, tempMin: 2700, tempMax: 6500 });
     assert.equal(p.dimming, 20);
     assert.equal(p.temp, 2700);
+  });
+
+  it('with whiteMix, routes an RGB colour through the white channels', () => {
+    const p = buildSetPilotParams(
+      { on: true, mode: 'rgb', rgb: [255, 180, 180], brightness: 100 },
+      {},
+      { whiteMix: true },
+    );
+    assert.deepEqual(p, { state: true, dimming: 100, r: 75, g: 0, b: 0, c: 180, w: 180 });
+  });
+
+  it('whiteMix leaves a fully-saturated colour on the RGB LEDs (no white)', () => {
+    const p = buildSetPilotParams(
+      { on: true, mode: 'rgb', rgb: [255, 0, 0], brightness: 100 },
+      {},
+      { whiteMix: true },
+    );
+    assert.deepEqual(p, { state: true, dimming: 100, r: 255, g: 0, b: 0, c: 0, w: 0 });
+  });
+
+  it('defaults to pure RGB when whiteMix is unset', () => {
+    const p = buildSetPilotParams({ on: true, mode: 'rgb', rgb: [255, 180, 180], brightness: 100 });
+    assert.deepEqual(Object.keys(p).sort(), ['b', 'dimming', 'g', 'r', 'state']);
+  });
+});
+
+describe('model: rgbToWhiteMixed', () => {
+  it('splits the achromatic part to white channels, chromatic remainder on RGB', () => {
+    assert.deepEqual(rgbToWhiteMixed([255, 180, 180]), { r: 75, g: 0, b: 0, c: 180, w: 180 });
+  });
+
+  it('leaves a fully-saturated colour unchanged (no white)', () => {
+    assert.deepEqual(rgbToWhiteMixed([255, 0, 0]), { r: 255, g: 0, b: 0, c: 0, w: 0 });
+  });
+
+  it('sends a neutral/near-white colour almost entirely as white', () => {
+    assert.deepEqual(rgbToWhiteMixed([255, 255, 255]), { r: 0, g: 0, b: 0, c: 255, w: 255 });
   });
 });
 

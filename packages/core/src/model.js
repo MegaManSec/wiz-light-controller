@@ -68,9 +68,12 @@ export function parsePilot(result) {
  *
  * @param {LightState} state
  * @param {{ dimMin?: number, tempMin?: number, tempMax?: number }} [bounds]
+ * @param {{ whiteMix?: boolean }} [options]  when set, an RGB colour's achromatic
+ *   part is routed to the white channels (`c`/`w`) so the bright white LEDs help —
+ *   brighter, slightly less saturated. Off by default (faithful pure RGB).
  * @returns {Record<string, number|boolean>}
  */
-export function buildSetPilotParams(state, bounds = {}) {
+export function buildSetPilotParams(state, bounds = {}, { whiteMix = false } = {}) {
   if (!state.on) return { state: false };
 
   const dimMin = bounds.dimMin ?? DIMMING_MIN;
@@ -80,11 +83,28 @@ export function buildSetPilotParams(state, bounds = {}) {
   const params = { state: true, dimming: clampInt(state.brightness, dimMin, DIMMING_MAX) };
   if (state.mode === 'white') {
     params.temp = clampInt(state.temp, tempMin, tempMax);
+  } else if (whiteMix) {
+    Object.assign(params, rgbToWhiteMixed(clampRgb(state.rgb)));
   } else {
     const [r, g, b] = clampRgb(state.rgb);
     Object.assign(params, { r, g, b });
   }
   return params;
+}
+
+/**
+ * Split an RGB colour into a chromatic remainder plus an achromatic "white"
+ * component, so the bulb's bright white LEDs carry the non-saturated part of the
+ * colour: `white = min(r, g, b)` drives both white channels (`c`/`w`), and the
+ * remainder stays on the RGB LEDs. A fully-saturated colour (min 0) gets no white
+ * and is unchanged — a pure hue can only use the dimmer colour LEDs.
+ *
+ * @param {[number, number, number]} rgb  0–255 channels (already clamped)
+ * @returns {{ r: number, g: number, b: number, c: number, w: number }}
+ */
+export function rgbToWhiteMixed([r, g, b]) {
+  const white = Math.min(r, g, b);
+  return { r: r - white, g: g - white, b: b - white, c: white, w: white };
 }
 
 /**

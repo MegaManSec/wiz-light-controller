@@ -145,9 +145,7 @@ jobs:
       - name: Attest build provenance
         # Publishes signed SLSA build provenance for the zipped app, so consumers
         # can verify it was built by this workflow from this commit.
-        # TODO: pin SHA — replace the tag below with the action's commit SHA, e.g.
-        #   actions/attest-build-provenance@<40-char-sha> # vX.Y.Z
-        uses: actions/attest-build-provenance@v2 # TODO: pin SHA
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: ${{ steps.zip.outputs.path }}
 

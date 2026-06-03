@@ -1,0 +1,7 @@
+node_modules/
+dist/
+out/
+apps/
+pnpm-lock.yaml
+legacy/
+assets/

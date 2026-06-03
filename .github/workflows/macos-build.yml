@@ -1,0 +1,164 @@
+name: macOS Build
+
+# Builds the native macOS menu-bar app (apps/macos) and, on a version tag,
+# attaches the packaged `.app` to the GitHub Release. The Swift app embeds the
+# shared wiz-light-core logic via JavaScriptCore, so the JS bundle is regenerated
+# (`pnpm build:jscore`) before `swift build`/`swift test` and `make app`.
+#
+# Triggers:
+#   - push of a `v*` tag   → build + attach to the matching Release.
+#   - workflow_dispatch     → manual build (also the supported way to (re)build
+#     a tag). The Release workflow tags with the default GITHUB_TOKEN, and a tag
+#     pushed by that token does NOT auto-trigger other workflows (GitHub
+#     suppresses that to avoid recursion). So after a release cut this workflow
+#     is started manually via `gh workflow run macos-build.yml --ref vX.Y.Z`
+#     (or the Actions UI) against the new tag.
+#
+# Signing & notarization are GATED on repository secrets. With them present the
+# Makefile signs with a Developer ID Application certificate (hardened runtime)
+# and the app is notarized + stapled; without them CI falls back to the
+# Makefile's ad-hoc signature (the app runs locally, Gatekeeper will warn on
+# other machines). Required secrets for a signed + notarized build:
+#   - CODESIGN_IDENTITY            "Developer ID Application: Name (TEAMID)"
+#   - APPLE_ID                     Apple Account email used for notarization
+#   - APPLE_APP_SPECIFIC_PASSWORD  app-specific password for that Apple Account
+#   - APPLE_TEAM_ID                10-character Apple Developer Team ID
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# No ambient token: the one job opts back in to exactly what it needs.
+permissions: {}
+
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build app
+    runs-on: macos-14
+    timeout-minutes: 30
+    permissions:
+      contents: write # attach the packaged app to the Release on a tag
+      id-token: write # OIDC token for build-provenance attestation
+      attestations: write # publish the build provenance
+    env:
+      APP_NAME: WiZ Light Controller
+      # All four secrets present → a full Developer ID + notarized build is
+      # possible. Computed here because the `secrets` context is not allowed in a
+      # step `if:`; the `env` context is.
+      HAS_SIGNING: ${{ secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' && secrets.CODESIGN_IDENTITY != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24'
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - name: Install dependencies
+        # Reproducible, integrity-checked install from the committed lockfile.
+        run: pnpm install --frozen-lockfile
+
+      - name: Build JavaScriptCore bundle
+        # Regenerate apps/macos/Sources/WizKit/Resources/wiz-core.global.js from
+        # wiz-light-core so the Swift engine layer is built against current sources.
+        run: pnpm build:jscore
+
+      - name: Build (Swift)
+        run: swift build --package-path apps/macos
+
+      - name: Test (Swift)
+        # WizKitTests exercise the JavaScriptCore bridge against the real bundle.
+        run: swift test --package-path apps/macos
+
+      - name: Package app
+        # The Makefile assembles "WiZ Light Controller.app". It signs with
+        # CODESIGN_IDENTITY (Developer ID, hardened runtime via
+        # `codesign --options runtime`) when set, else ad-hoc signs (its
+        # default) — the unsigned-CI fallback.
+        env:
+          CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
+        run: make -C apps/macos app
+
+      - name: Locate app bundle
+        id: app
+        # The Makefile assembles into apps/macos/build/. Resolve the path once so
+        # later steps don't hard-code it.
+        run: |
+          APP_PATH="apps/macos/build/$APP_NAME.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::expected app bundle not found at $APP_PATH"
+            exit 1
+          fi
+          echo "path=$APP_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Notarize and staple
+        # GATED: only runs for a fully-signed build (all notarization secrets
+        # present). An ad-hoc CI build skips this — notarization requires a
+        # Developer ID signature. notarytool uploads the app, waits for the
+        # Apple service to finish, then stapler attaches the ticket so Gatekeeper
+        # accepts it offline.
+        if: env.HAS_SIGNING == 'true'
+        env:
+          APP_PATH: ${{ steps.app.outputs.path }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # notarytool takes a zip; staple writes the ticket into the .app.
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" notarize.zip
+          xcrun notarytool submit notarize.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$APP_PATH"
+          rm -f notarize.zip
+
+      - name: Zip app
+        id: zip
+        # ditto with --sequesterRsrc --keepParent is the macOS-correct way to zip
+        # a bundle: it preserves resource forks/extended attributes and keeps the
+        # top-level .app directory inside the archive.
+        env:
+          APP_PATH: ${{ steps.app.outputs.path }}
+        run: |
+          ZIP_NAME="WiZ-Light-Controller-macOS.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_NAME"
+          echo "name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+          echo "path=$(realpath "$ZIP_NAME")" >> "$GITHUB_OUTPUT"
+
+      - name: Attest build provenance
+        # Publishes signed SLSA build provenance for the zipped app, so consumers
+        # can verify it was built by this workflow from this commit.
+        # TODO: pin SHA — replace the tag below with the action's commit SHA, e.g.
+        #   actions/attest-build-provenance@<40-char-sha> # vX.Y.Z
+        uses: actions/attest-build-provenance@v2 # TODO: pin SHA
+        with:
+          subject-path: ${{ steps.zip.outputs.path }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-app
+          path: ${{ steps.zip.outputs.path }}
+
+      - name: Attach to Release
+        # Only on a real tag: upload (clobbering on a re-run) the zip to the
+        # Release the Release workflow created for this tag.
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          ZIP_PATH: ${{ steps.zip.outputs.path }}
+        run: gh release upload "$TAG" "$ZIP_PATH" --clobber

@@ -1,0 +1,30 @@
+node_modules/
+.pnpm-store/
+
+# Swift / SwiftPM
+.build/
+*.xcarchive
+DerivedData/
+apps/macos/build/*.app/
+apps/macos/build/*.iconset/
+apps/macos/build/AppIcon.icns
+
+# Build output
+dist/
+out/
+coverage/
+*.tsbuildinfo
+
+# Packaging artifacts
+*.dmg
+*.zip
+*.blockmap
+*.app/
+
+# Local + editor
+.env
+.env.*
+.DS_Store
+*.log
+.idea/
+.vscode/

@@ -1,0 +1,23 @@
+{
+  "name": "wiz-light-cli",
+  "version": "0.1.0",
+  "description": "Fast, local, cloud-free command-line controller for Philips WiZ lights.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "bin": {
+    "wiz": "src/index.js"
+  },
+  "files": [
+    "src"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "wiz-light-core": "workspace:*"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "wiz-light-core",
+  "version": "0.1.0",
+  "description": "Local WiZ light engine: protocol, discovery, colour math, and persisted state. Zero runtime dependencies.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./color": "./src/color.js",
+    "./validate": "./src/validate.js",
+    "./model": "./src/model.js"
+  },
+  "files": [
+    "src"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage"
+  }
+}

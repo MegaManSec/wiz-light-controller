@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- App Sandbox on. -->
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+  <!-- Outbound UDP: setPilot / getPilot to a bulb, and sending broadcasts. -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <!-- Inbound UDP: receiving getSystemConfig / getPilot replies. Broadcast
+       discovery (255.255.255.255 + directed subnet broadcasts) works under
+       these two entitlements. The multicast entitlement
+       (com.apple.developer.networking.multicast) is Apple-approval-gated and is
+       only needed if discovery is switched to IP multicast — we use broadcast,
+       so it is intentionally omitted. -->
+  <key>com.apple.security.network.server</key>
+  <true/>
+</dict>
+</plist>

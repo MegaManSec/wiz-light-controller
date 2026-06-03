@@ -8,14 +8,17 @@ import WizKit
 /// `.accessory` activation-policy dance, the manual window, and the quit
 /// semantics that keep the app living in the menu bar.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
   // MARK: - State
 
   /// The single shared app state. The status item, menu, and views all read it.
   let appState = AppState()
 
   private var statusItem: NSStatusItem!
-  private var menuController: MenuBarController!
+  /// The menu-bar dropdown, as a transient SwiftUI popover (live + animated).
+  private var popover: NSPopover?
+  /// Global mouse monitor that dismisses the popover when you click outside it.
+  private var clickMonitor: Any?
   /// Cached controller window. Built lazily on first open, kept across closes.
   private var windowController: ControllerWindowController?
 
@@ -30,7 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   // MARK: - Lifecycle
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    menuController = MenuBarController(appState: appState, delegate: self)
+    // `.help` tooltips have a long default initial-hover delay; shorten it to ~2s.
+    UserDefaults.standard.set(2000, forKey: "NSInitialToolTipDelay")
     setupStatusBar()
     setupActivationPolicyTracking()
     observeState()
@@ -138,46 +142,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   // MARK: - Click → menu
 
-  /// Both buttons open the menu. We attach the menu, synthesize a click to pop
-  /// it, then detach — the standard status-item "click opens menu" trick that
-  /// still lets us field plain clicks for other behaviours if needed.
+  /// Single-click toggles the dropdown popover (closes it if already open).
   @objc private func handleClick(_ sender: NSStatusBarButton) {
-    let menu = menuController.makeMenu()
-    statusItem.menu = menu
-    statusItem.button?.performClick(nil)
-    statusItem.menu = nil
-  }
-
-  // MARK: - Menu actions (targets for MenuBarController items)
-
-  @objc func togglePower(_ sender: NSMenuItem) {
-    appState.setPower(!appState.state.on)
-  }
-
-  /// Select a saved light from the menu. `representedObject` carries its MAC.
-  @objc func selectSavedLight(_ sender: NSMenuItem) {
-    guard let mac = sender.representedObject as? String,
-      let light = appState.savedLights[mac]
-    else { return }
-    if mac == appState.selectedMac, appState.connected {
-      appState.disconnect()  // clicking the already-connected light disconnects it
-    } else {
-      appState.selectLight(name: light.name, ip: light.ip, mac: mac)
+    if let popover = popover, popover.isShown {
+      popover.performClose(sender)
+      return
+    }
+    let pop = popover ?? makePopover()
+    popover = pop
+    NSApp.activate(ignoringOtherApps: true)
+    pop.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+    // Keep the status button looking "pressed" while the popover is open. The
+    // click's own highlight clears on mouse-up, so assert it next tick (guarded so
+    // a quick open→close can't leave it stuck on).
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self, self.popover?.isShown == true else { return }
+      self.statusItem.button?.highlight(true)
+      // Focus the popover so its controls render in their active (accent/blue)
+      // state immediately, without needing a click inside first.
+      self.popover?.contentViewController?.view.window?.makeKey()
+    }
+    // Refresh a connected light's values each time the dropdown opens — but don't
+    // reconnect a disconnected one (so it never overrides a manual disconnect).
+    appState.refreshIfConnected()
+    // Dismiss when the user clicks outside (the desktop or another app); the
+    // popover delegate tears this monitor down on close.
+    clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) {
+      [weak self] _ in self?.popover?.performClose(nil)
     }
   }
 
-  @objc func openControllerFromMenu(_ sender: Any?) {
+  /// Build the SwiftUI dropdown popover. Transient so it closes on an outside
+  /// click; reused across opens and reflects live state via the shared AppState.
+  private func makePopover() -> NSPopover {
+    let pop = NSPopover()
+    pop.behavior = .transient
+    pop.animates = true
+    pop.delegate = self
+    let content = DropdownView(
+      onOpenControls: { [weak self] in self?.openControlsFromPopover() },
+      onQuit: { [weak self] in self?.quitFromStatusBar(nil) }
+    ).environmentObject(appState)
+    let host = NSHostingController(rootView: content)
+    host.sizingOptions = [.preferredContentSize]  // smoother popover resize on mode switches
+    pop.contentViewController = host
+    return pop
+  }
+
+  /// Close the popover, then open the full controls window.
+  private func openControlsFromPopover() {
+    popover?.performClose(nil)
     openController(tab: .controls)
   }
 
-  @objc func openLatestReleasePage(_ sender: Any?) {
-    guard let url = UpdateChecker.shared.releasePageURL else { return }
-    NSWorkspace.shared.open(url)
+  /// Tear down the outside-click monitor whenever the popover closes (any cause).
+  func popoverDidClose(_ notification: Notification) {
+    statusItem.button?.highlight(false)
+    if let monitor = clickMonitor {
+      NSEvent.removeMonitor(monitor)
+      clickMonitor = nil
+    }
   }
+
+  // MARK: - Quit
 
   /// Status-bar Quit: set the flag so `applicationShouldTerminate` lets us exit.
   @objc func quitFromStatusBar(_ sender: Any?) {
     quitFromStatusBarMenu = true
+    // Dismiss any open window/sheet first (e.g. the Discover sheet) — a presented
+    // sheet can otherwise block termination — then quit.
+    for window in NSApp.windows where window.level == .normal {
+      window.close()
+    }
     NSApp.terminate(sender)
   }
 

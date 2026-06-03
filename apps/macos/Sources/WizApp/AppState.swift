@@ -372,6 +372,14 @@ final class AppState: ObservableObject {
     syncAttempt(host: selectedIp, attempt: 0)
   }
 
+  /// Re-read a *connected* light's values (e.g. when the dropdown opens) without
+  /// reconnecting a disconnected one — so opening the menu never overrides a
+  /// manual disconnect. No-op while disconnected.
+  func refreshIfConnected() {
+    guard connected else { return }
+    refreshSignal()
+  }
+
   private func syncAttempt(host: String, attempt: Int) {
     guard selectedIp == host, let client = client else { return }
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in

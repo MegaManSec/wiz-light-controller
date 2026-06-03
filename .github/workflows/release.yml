@@ -70,6 +70,32 @@ jobs:
             echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Verify versions are in lockstep
+        if: steps.gate.outputs.version != ''
+        # The release keys everything off the single root version — tarball names,
+        # the tag, and the app's CFBundleShortVersionString. Fail here, before any
+        # publish, if a source disagrees, so a half-bumped set can never ship.
+        env:
+          VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          core=$(node -p "require('./packages/core/package.json').version")
+          cli=$(node -p "require('./packages/cli/package.json').version")
+          plist=$(grep -A1 '<key>CFBundleShortVersionString</key>' apps/macos/build/Info.plist \
+            | grep -oE '<string>[^<]*</string>' | head -1 | sed -E 's#</?string>##g')
+          echo "root=$VERSION  core=$core  cli=$cli  macos=$plist"
+          status=0
+          for entry in "packages/core=$core" "packages/cli=$cli" "apps/macos Info.plist=$plist"; do
+            if [ "${entry#*=}" != "$VERSION" ]; then
+              echo "::error::${entry%%=*} is at ${entry#*=}, but the release version is $VERSION"
+              status=1
+            fi
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "Every package version and the app's CFBundleShortVersionString must match the root ($VERSION) — bump them in lockstep."
+            exit 1
+          fi
+          echo "All version sources are in lockstep at $VERSION."
+
       - name: Generate release notes
         if: steps.gate.outputs.version != ''
         # Pure Node, zero deps — Conventional-Commit changelog since the last tag.

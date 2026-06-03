@@ -160,7 +160,7 @@ final class MenuBarController {
     // iconXOffset trims a symbol's own left whitespace so different SF Symbols'
     // visible edges line up (sun.max renders a few pt right of thermometer.medium).
     let icon = NSImageView(
-      frame: NSRect(x: 26 + iconXOffset, y: (height - 15) / 2, width: 15, height: 15))
+      frame: NSRect(x: 27 + iconXOffset, y: (height - 15) / 2, width: 15, height: 15))
     icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
     icon.imageAlignment = .alignLeft // pin the symbol's left edge to x, not a centered inset
     icon.contentTintColor = .secondaryLabelColor

@@ -158,6 +158,7 @@ private struct HexField: View {
   @State private var text = ""
   @State private var invalid = false
   @State private var shake: CGFloat = 0
+  @FocusState private var focused: Bool
 
   private static let template = "FFFFFF"
 
@@ -174,7 +175,10 @@ private struct HexField: View {
       Spacer()
     }
     .onAppear { text = sanitize(app.hex) }
-    .onChange(of: app.hex) { text = sanitize($0) }
+    // Don't clobber what the user is typing if a background poll folds in a new
+    // colour; re-sync (and normalise to upper-case) when the field loses focus.
+    .onChange(of: app.hex) { if !focused { text = sanitize($0) } }
+    .onChange(of: focused) { if !$0 { text = sanitize(app.hex) } }
   }
 
   /// `#` + a fixed-width field where the typed digits sit over a greyed six-digit
@@ -186,7 +190,11 @@ private struct HexField: View {
         Text(ghost).foregroundStyle(.tertiary)
         TextField("", text: $text)
           .textFieldStyle(.plain)
-          .onChange(of: text) { text = sanitize($0) }
+          .focused($focused)
+          // Filter to hex (max six) but keep the typed case — re-assigning `text`
+          // to a different string jumps the caret to the end, so upper-casing is
+          // deferred to submit / the focus-loss re-sync above.
+          .onChange(of: text) { text = acceptHexInput($0) }
           .onSubmit(submit)
       }
       .frame(width: 62, alignment: .leading)
@@ -209,15 +217,21 @@ private struct HexField: View {
     return String(repeating: " ", count: typed) + String(Self.template.dropFirst(typed))
   }
 
-  /// Hex digits only, upper-cased, capped at six.
+  /// Hex digits only, upper-cased, capped at six. Used to display the live colour.
   private func sanitize(_ s: String) -> String {
     String(s.uppercased().filter { $0.isHexDigit }.prefix(6))
+  }
+
+  /// Live typing: hex digits only, capped at six, with the typed case preserved.
+  private func acceptHexInput(_ s: String) -> String {
+    String(s.filter { $0.isHexDigit }.prefix(6))
   }
 
   private func submit() {
     // Reject incomplete input and pure black (which the bulb can't show).
     if text.count == 6, text != "000000" {
       invalid = false
+      text = text.uppercased()  // normalise the display (caret is at the end → no jump)
       app.setHex(text)
     } else {
       flagInvalid()

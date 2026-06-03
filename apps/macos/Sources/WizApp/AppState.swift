@@ -714,7 +714,10 @@ final class AppState: ObservableObject {
         if self.savedLights[light.mac] != nil {
           self.savedLights = self.stores.updateSavedLightIp(mac: light.mac, ip: light.ip)
           if light.mac == self.selectedMac, self.selectedIp != light.ip {
-            self.selectLight(name: self.selectedName, ip: light.ip, mac: light.mac)
+            // Follow the new IP, but don't reconnect a manually-disconnected light.
+            self.selectLight(
+              name: self.selectedName, ip: light.ip, mac: light.mac,
+              connect: !self.manuallyDisconnected)
           }
         }
       }

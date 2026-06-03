@@ -159,21 +159,36 @@ final class AppState: ObservableObject {
   ]
   private var dimToWarmCurve = AppState.defaultDimToWarm
 
+  /// Per-mode memory so returning to a mode restores its last colour/temperature
+  /// (e.g. switching through Warm Glow doesn't lose your White temperature).
+  /// Session-scoped; reset when the selected light changes.
+  private var rgbMemory: [Int]?
+  private var whiteTempMemory: Int?
+
   /// The active mode for the 3-way picker.
   var colorMode: ColorMode {
     if warmGlow { return .warmGlow }
     return state.mode == .rgb ? .rgb : .white
   }
 
-  /// Switch modes. Warm Glow snaps the temperature to the curve immediately.
+  /// Switch modes, remembering the colour/temperature of the mode we leave and
+  /// restoring the one we return to (so passing through Warm Glow doesn't lose
+  /// your White temperature). Warm Glow snaps the temperature to the curve.
   func setColorMode(_ mode: ColorMode) {
+    switch colorMode {  // remember what we're leaving
+    case .rgb: rgbMemory = state.rgb
+    case .white: whiteTempMemory = state.temp
+    case .warmGlow: break  // temperature is derived from brightness; nothing to save
+    }
     switch mode {
     case .rgb:
       warmGlow = false
       state.mode = .rgb
+      if let rgb = rgbMemory { state.rgb = rgb }
     case .white:
       warmGlow = false
       state.mode = .white
+      if let temp = whiteTempMemory { state.temp = clampTemp(temp) }
     case .warmGlow:
       warmGlow = true
       state.mode = .white

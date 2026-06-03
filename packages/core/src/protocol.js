@@ -36,7 +36,10 @@ export function sendPilot(
   assertHost(host);
   return new Promise((resolve, reject) => {
     const socket = createSocket();
+    let settled = false;
     const done = (err) => {
+      if (settled) return; // a send-callback error + a later 'error' event must not double-close
+      settled = true;
       socket.close();
       err ? reject(err) : resolve();
     };
@@ -105,6 +108,7 @@ export function getSystemConfig(host, options) {
 export class WizLight {
   #timer = null;
   #pending = null;
+  #sendGen = 0;
 
   constructor(host, options = {}) {
     assertHost(host);
@@ -128,7 +132,11 @@ export class WizLight {
 
   /** Send `params` immediately, repeated `retries` times to survive packet loss. */
   async sendNow(params) {
+    // Tag this send; if a newer send starts while this retry loop is mid-flight,
+    // abandon the remaining retries so a stale payload can't land after the new one.
+    const gen = (this.#sendGen += 1);
     for (let i = 0; i < this.retries; i += 1) {
+      if (gen !== this.#sendGen) return;
       await sendPilot(this.host, params, this.#opts());
       if (i < this.retries - 1) await delay(this.retryIntervalMs);
     }

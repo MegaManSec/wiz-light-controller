@@ -64,6 +64,16 @@ describe('protocol: sendPilot', () => {
     assert.equal(socket.closed, 1);
   });
 
+  it('closes only once when a successful send is followed by a late error event', async () => {
+    const socket = makeFakeSocket();
+    await sendPilot(HOST, { state: true }, { createSocket: () => socket });
+    assert.equal(socket.closed, 1);
+    // A late async socket error (e.g. ICMP port-unreachable after the datagram
+    // left) must not double-close the already-closed socket.
+    socket.emit('error', new Error('late'));
+    assert.equal(socket.closed, 1, 'the settled guard prevents a second close');
+  });
+
   it('throws TypeError synchronously for an invalid host', async () => {
     assert.throws(() => sendPilot('not-an-ip', {}, { createSocket: makeFakeSocket }), TypeError);
   });

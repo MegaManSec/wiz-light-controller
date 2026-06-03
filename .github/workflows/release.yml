@@ -91,13 +91,16 @@ jobs:
         # credentials via the per-package "Trusted Publisher" configured on npmjs.
         # Runs before the tag/Release below so a failure here stays fully
         # retryable (the gate keys off the tag, which isn't created yet). The
-        # tarballs already have `workspace:*` resolved by `pnpm pack`. Idempotent:
-        # a version already on the registry is skipped (e.g. the bootstrap 0.1.0),
-        # so core publishes before cli and re-runs are safe.
+        # tarballs already have `workspace:*` resolved by `pnpm pack`. We pack with
+        # pnpm (pinned via corepack) but publish with a pinned npm: pnpm's own OIDC
+        # publish only exists in pnpm 11+, which currently regresses on it
+        # (pnpm/pnpm#11513), and we pin pnpm 10. Idempotent: a version already on
+        # the registry is skipped (e.g. the bootstrap 0.1.0), so core publishes
+        # before cli and re-runs are safe.
         env:
           VERSION: ${{ steps.gate.outputs.version }}
         run: |
-          npm install -g npm@latest # OIDC trusted publishing needs npm >= 11.5.1
+          npm install -g npm@11.5.1 # pinned; trusted publishing needs npm >= 11.5.1
           for pkg in wiz-light-core wiz-light-cli; do
             if npm view "$pkg@$VERSION" version >/dev/null 2>&1; then
               echo "$pkg@$VERSION already on npm — skipping."

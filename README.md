@@ -1,4 +1,8 @@
-# WiZ Light Controller
+<p align="center">
+  <img src="assets/app_iconhigh.png" alt="WiZ Light Controller app icon" width="200">
+</p>
+
+<h1 align="center">WiZ Light Controller</h1>
 
 Fast, **local, cloud-free** control for Philips WiZ smart bulbs. It talks to bulbs directly over your LAN (UDP) — no account, no cloud round-trip, no telemetry. At its heart is one small, dependency-free JavaScript engine (`wiz-light-core`) that is reused by two front-ends: a `wiz` **CLI** and a **native macOS menu-bar app** (Swift), which runs the engine's pure colour and light-state logic via **JavaScriptCore** — so both share a single, tested implementation.
 

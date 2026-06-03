@@ -7,7 +7,10 @@
 export const TEMP_MIN = 2200;
 export const TEMP_MAX = 6500;
 
-const clampByte = (n) => Math.max(0, Math.min(255, Math.round(n)));
+const clampByte = (n) => {
+  const r = Math.round(n);
+  return Number.isFinite(r) ? Math.max(0, Math.min(255, r)) : 0;
+};
 
 /**
  * Convert an `[r, g, b]` triple (0–255) to `[h, s, v]` (0–1).

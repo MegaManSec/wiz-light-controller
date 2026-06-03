@@ -44,7 +44,11 @@ export function discover({
     const found = new Map();
     const payload = Buffer.from(JSON.stringify({ method: 'getSystemConfig', params: {} }), 'utf8');
     let attemptTimer = null;
-    let remaining = attempts;
+    // Guard against a non-numeric / non-positive attempt count, which would
+    // otherwise loop forever (`remaining` stays NaN, so `remaining <= 0` is never
+    // true) — and against a bad listen window.
+    let remaining = Number.isFinite(attempts) && attempts >= 1 ? Math.floor(attempts) : 3;
+    const listenMs = Number.isFinite(timeoutMs) && timeoutMs >= 0 ? timeoutMs : 2000;
 
     const cleanup = () => {
       clearTimeout(attemptTimer);
@@ -87,14 +91,15 @@ export function discover({
       socket.send(payload, port, broadcastAddr, () => {});
       remaining -= 1;
       if (remaining <= 0) {
-        attemptTimer = setTimeout(finish, timeoutMs);
+        attemptTimer = setTimeout(finish, listenMs);
       } else {
-        attemptTimer = setTimeout(broadcastOnce, timeoutMs);
+        attemptTimer = setTimeout(broadcastOnce, listenMs);
       }
     };
 
     signal?.addEventListener('abort', onAbort, { once: true });
     socket.bind(() => {
+      if (signal?.aborted) return; // aborted during bind → the socket is already closed
       socket.setBroadcast(true);
       broadcastOnce();
     });

@@ -2,14 +2,23 @@
 // or malformed file yields the caller's fallback); writes are atomic (write to a
 // temp file, then rename) so a crash mid-write can't truncate good data.
 
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 async function atomicWrite(file, contents) {
   await mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmp, contents, 'utf8');
-  await rename(tmp, file);
+  // Unique per write — `pid.timestamp` collides for two same-millisecond writes to
+  // one file, so the loser's rename would hit ENOENT. Clean up a leftover temp if
+  // the rename fails, so a failed write can't litter the data dir.
+  const tmp = `${file}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmp, contents, 'utf8');
+    await rename(tmp, file);
+  } catch (err) {
+    await unlink(tmp).catch(() => {});
+    throw err;
+  }
 }
 
 export async function readJson(file, fallback) {

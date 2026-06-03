@@ -263,3 +263,25 @@ describe('discovery: socket error', () => {
     assert.equal(socket.closed, 1);
   });
 });
+
+describe('discovery: invalid attempt count', () => {
+  beforeEach(() => mock.timers.enable({ apis: ['setTimeout'] }));
+  afterEach(() => mock.timers.reset());
+
+  it('falls back to the default instead of looping forever on a NaN attempts', async () => {
+    const socket = makeFakeSocket();
+    const promise = discover({ attempts: NaN, timeoutMs: 2000, createSocket: () => socket });
+    await flush();
+    assert.equal(socket.sent.length, 1, 'broadcasts despite the bad attempt count');
+    // The default is 3 attempts: step through them plus the final listen window.
+    mock.timers.tick(2000);
+    await flush();
+    mock.timers.tick(2000);
+    await flush();
+    mock.timers.tick(2000); // final listen window resolves
+    const result = await promise; // resolves at all → it did not hang on NaN
+    assert.deepEqual(result, []);
+    assert.equal(socket.sent.length, 3);
+    assert.equal(socket.closed, 1);
+  });
+});

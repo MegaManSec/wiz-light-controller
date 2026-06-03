@@ -57,7 +57,10 @@ var WizCore = (() => {
   // packages/core/src/color.js
   var TEMP_MIN = 2200;
   var TEMP_MAX = 6500;
-  var clampByte = (n) => Math.max(0, Math.min(255, Math.round(n)));
+  var clampByte = (n) => {
+    const r = Math.round(n);
+    return Number.isFinite(r) ? Math.max(0, Math.min(255, r)) : 0;
+  };
   function rgbToHsv([r, g, b]) {
     const rf = r / 255;
     const gf = g / 255;

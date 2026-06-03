@@ -105,7 +105,7 @@ final class MenuBarController {
     let colour = currentColourRgb()
     let (item, slider) = sliderRow(
       symbol: Symbols.brightness, min: 1, max: 100, value: Double(appState.state.brightness),
-      gradient: gradient(from: scaled(colour, 0.12), to: colour)
+      gradient: gradient(from: scaled(colour, 0.12), to: colour), iconXOffset: -3
     ) { [weak self] value in
       guard let self else { return }
       self.appState.setBrightness(Int(value.rounded()))
@@ -148,18 +148,25 @@ final class MenuBarController {
   /// row is sized to the menu's content width so the slider spans it.
   private func sliderRow(
     symbol: String, min: Double, max: Double, value: Double, gradient: NSGradient,
+    iconXOffset: CGFloat = 0,
     onChange: @escaping (Double) -> Void
   ) -> (item: NSMenuItem, slider: MenuSlider) {
     let width = menuWidth()
     let height: CGFloat = 26
     let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
 
-    let icon = NSImageView(frame: NSRect(x: 14, y: (height - 15) / 2, width: 15, height: 15))
+    // x lines the icon up with the standard items' image column (right of the
+    // reserved checkmark/state column), matching the Power + saved-light icons.
+    // iconXOffset trims a symbol's own left whitespace so different SF Symbols'
+    // visible edges line up (sun.max renders a few pt right of thermometer.medium).
+    let icon = NSImageView(
+      frame: NSRect(x: 26 + iconXOffset, y: (height - 15) / 2, width: 15, height: 15))
     icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+    icon.imageAlignment = .alignLeft // pin the symbol's left edge to x, not a centered inset
     icon.contentTintColor = .secondaryLabelColor
     container.addSubview(icon)
 
-    let sliderX: CGFloat = 37
+    let sliderX: CGFloat = 52 // track start, kept clear of the icon column
     let slider = MenuSlider(frame: NSRect(x: sliderX, y: 0, width: width - sliderX - 16, height: height))
     slider.minValue = min
     slider.maxValue = max

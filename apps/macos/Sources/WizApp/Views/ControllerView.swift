@@ -35,18 +35,22 @@ struct ControllerView: View {
         ConnectionBar()
         if app.connected {
           PowerModeBar()
-          if app.state.on {
-            if app.warmGlow {
-              WarmGlowInfo()
-            } else if app.state.mode == .rgb {
-              ColorWheelView()
-              SlidersView()
-            } else {
-              WhiteTempView()
-            }
-            BrightnessView()
-            if !app.warmGlow { PresetsView() }
+            .padding(.bottom, 10)
+          // Colour controls stay visible even when off, so you can stage a colour
+          // or mode and have it apply when you bring the brightness back up.
+          if app.warmGlow {
+            WarmGlowInfo()
+          } else if app.state.mode == .rgb {
+            ColorWheelView()
+            SlidersView()
+            WhiteMixToggle()
+          } else {
+            WhiteTempView()
           }
+          // Brightness stays visible even when off (knob at 0) — slide up to turn
+          // the light back on and set the level.
+          BrightnessView()
+          PresetsView()
         } else if app.hasLight {
           Label(
             "Not connected — press Connect to control \(app.displayName).",
@@ -160,16 +164,14 @@ struct PowerModeBar: View {
       .toggleStyle(.switch)
       .disabled(!app.hasLight)
 
-      if app.state.on {
-        Picker("Mode", selection: modeBinding) {
-          ForEach(AppState.ColorMode.allCases) { mode in
-            Text(mode.label).tag(mode)
-          }
+      Picker("Mode", selection: modeBinding) {
+        ForEach(AppState.ColorMode.allCases) { mode in
+          Text(mode.label).tag(mode)
         }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: 280)
-        .disabled(!app.hasLight)
       }
+      .pickerStyle(.segmented)
+      .frame(maxWidth: 280)
+      .disabled(!app.hasLight)
       Spacer()
     }
   }
@@ -201,5 +203,25 @@ struct WarmGlowInfo: View {
       Spacer()
     }
     .padding(.vertical, 4)
+  }
+}
+
+/// RGB-only switch: blend a colour's white component into the bulb's bright white
+/// LEDs for a noticeably brighter (slightly less saturated) result. Off keeps
+/// colours faithful but dimmer — the colour LEDs alone.
+struct WhiteMixToggle: View {
+  @EnvironmentObject var app: AppState
+
+  var body: some View {
+    Toggle(isOn: Binding(get: { app.whiteMix }, set: { app.setWhiteMix($0) })) {
+      VStack(alignment: .leading, spacing: 2) {
+        Text("Brighter colours")
+        Text("Uses the white LEDs to lift the colour — brighter, a little less saturated.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .toggleStyle(.switch)
+    .padding(.top, 2)
   }
 }

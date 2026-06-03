@@ -13,6 +13,8 @@ struct GradientSlider: View {
   /// Called continuously while dragging (after `value` updates) so callers can
   /// push the change to the light.
   var onEditing: () -> Void = {}
+  /// Called once when the drag ends (mouse released).
+  var onCommit: () -> Void = {}
 
   private let height: CGFloat = 18
   private let thumb: CGFloat = 16
@@ -48,7 +50,8 @@ struct GradientSlider: View {
             let frac = clampedX / usable
             value = range.lowerBound + Double(frac) * (range.upperBound - range.lowerBound)
             onEditing()
-          })
+          }
+          .onEnded { _ in onCommit() })
     }
     .frame(height: height)
   }

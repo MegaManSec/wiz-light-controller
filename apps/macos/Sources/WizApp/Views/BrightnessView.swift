@@ -13,7 +13,7 @@ struct BrightnessView: View {
         Label("Brightness", systemImage: "sun.max")
           .font(.subheadline)
         Spacer()
-        Text("\(app.state.brightness)%")
+        Text(app.state.on ? "\(app.state.brightness)%" : "Off")
           .font(.caption.monospacedDigit())
           .foregroundStyle(.secondary)
       }
@@ -21,15 +21,15 @@ struct BrightnessView: View {
         value: brightnessBinding,
         range: 0...100,
         colors: [Color(rgb: [43, 43, 43]), tintColor],
-        onEditing: { app.applyLive() })
+        onCommit: { app.commitBrightnessMemory() })
     }
   }
 
   /// Slider value as Double, writing back a clamped Int via the engine.
   private var brightnessBinding: Binding<Double> {
     Binding(
-      get: { Double(app.state.brightness) },
-      set: { app.setBrightness(Int($0.rounded())) })
+      get: { app.state.on ? Double(app.state.brightness) : 0 },
+      set: { app.setBrightnessLevel(Int($0.rounded())) })  // 0 turns the light off
   }
 
   /// The colour the track ramps toward.

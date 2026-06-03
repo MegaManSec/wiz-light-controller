@@ -80,6 +80,15 @@ final class AppState: ObservableObject {
   /// Consecutive silent health pings while connected; we drop to disconnected
   /// once this reaches `maxHealthFailures` (so a single blip doesn't flap).
   private var healthFailures = 0
+  /// When we last sent a local change. The connected poll won't fold the bulb's
+  /// reported state back in until a few seconds after this, so changes made
+  /// elsewhere (e.g. the phone app) surface without a poll yanking a control the
+  /// user is actively adjusting.
+  private var lastLocalEdit = Date.distantPast
+  /// Last >0 brightness — restored when the light is turned on, so it doesn't come
+  /// back at the ~1% you passed through on the way to off. Committed when a
+  /// brightness drag is released (see `commitBrightnessMemory`), never as 0.
+  private var lastBrightness = 100
 
   init() {
     // Seed from the engine's default before loading persisted state.
@@ -138,6 +147,11 @@ final class AppState: ObservableObject {
   /// True when Warm Glow is active (the wire mode is still white).
   @Published var warmGlow = false
 
+  /// RGB-only: route a colour's achromatic part through the bulb's bright white
+  /// channels for a much brighter, slightly less saturated result. Off = faithful
+  /// pure RGB (the dimmer colour LEDs only). A per-session choice; not persisted.
+  @Published var whiteMix = false
+
   /// Brightness%→Kelvin dim-to-warm curve, read from the bulb's `dim2WarmPoints`
   /// (else this sensible default), sorted by brightness.
   private static let defaultDimToWarm: [(kelvin: Int, brightness: Int)] = [
@@ -172,6 +186,33 @@ final class AppState: ObservableObject {
   func setBrightness(_ value: Int) {
     state.brightness = core.clampBrightness(value)
     if warmGlow { state.temp = kelvinForBrightness(state.brightness) }
+  }
+
+  /// Remember the current brightness as the level to restore on power-on — called
+  /// when a brightness drag is released. Never remembers 0 ("off"), so dragging
+  /// down to off leaves the previous level intact.
+  func commitBrightnessMemory() {
+    if state.on, state.brightness > 0 { lastBrightness = state.brightness }
+  }
+
+  /// Toggle white-mixing and re-send immediately so the brightness change shows.
+  func setWhiteMix(_ on: Bool) {
+    whiteMix = on
+    applyLive()
+  }
+
+  /// Set brightness from a slider. 0 turns the light off; any positive value sets
+  /// the brightness, turning the light back on if it was off. Sends immediately.
+  func setBrightnessLevel(_ value: Int) {
+    let v = core.clampBrightness(value)
+    if v <= 0 {
+      if state.on { setPower(false) }
+      return
+    }
+    let wasOff = !state.on
+    setBrightness(v)
+    if wasOff { state.on = true }
+    applyLive()
   }
 
   /// Map brightness → Kelvin for Warm Glow via the shared engine — one tested
@@ -317,6 +358,7 @@ final class AppState: ObservableObject {
           var next = parsed
           if next.mode == .white { next.rgb = self.state.rgb }
           self.state = next
+          if next.on, next.brightness > 0 { self.lastBrightness = next.brightness }
           self.deviceInfo.rssi = (result["rssi"] as? NSNumber)?.intValue ?? self.deviceInfo.rssi
           self.loadDeviceConfig(host: host, client: client)
           self.bump()
@@ -429,10 +471,11 @@ final class AppState: ObservableObject {
     reconnectTimer = timer
   }
 
-  /// Health check + signal refresh for the connected poll: a `getPilot` that
-  /// never touches `state` (so it can't clobber an edit). A reply refreshes the
-  /// signal and resets the failure count; `maxHealthFailures` consecutive
-  /// silences flip us to disconnected — tolerating a single dropped datagram or
+  /// Health check + state refresh for the connected poll. A reply refreshes the
+  /// signal, resets the failure count, and — unless the user just made a local
+  /// edit — folds the bulb's reported state back in, so changes made elsewhere
+  /// (e.g. the phone app) show up here too. `maxHealthFailures` consecutive
+  /// silences flip us to disconnected, tolerating a dropped datagram or
   /// micro-sleep without flapping.
   private func refreshSignal() {
     guard let client = client else { return }
@@ -444,6 +487,20 @@ final class AppState: ObservableObject {
         if let result = result {
           self.healthFailures = 0
           if let rssi = (result["rssi"] as? NSNumber)?.intValue { self.deviceInfo.rssi = rssi }
+          // Reflect changes made elsewhere (e.g. the phone app), but never yank a
+          // control mid-edit: only fold the bulb's state in once a few seconds
+          // have passed since our last send (which it has since adopted).
+          if Date().timeIntervalSince(self.lastLocalEdit) > 3,
+            let parsed = self.core.parsePilot(result)
+          {
+            var next = parsed
+            if next.mode == .white { next.rgb = self.state.rgb }
+            // While the light is off, the user may be staging a colour to apply
+            // when they turn it back up — don't let the poll overwrite it. Fold
+            // only when the bulb is on, or an on/off flip happened elsewhere.
+            if self.state.on || next.on, next != self.state { self.state = next }
+            if next.on, next.brightness > 0 { self.lastBrightness = next.brightness }
+          }
           self.bump()
         } else {
           self.healthFailures += 1
@@ -462,18 +519,28 @@ final class AppState: ObservableObject {
   /// Push the current `state` to the bulb (debounced + retried in `WizClient`).
   func applyLive() {
     guard let client = client else { return }
-    let params = core.buildSetPilotParams(state, bounds: deviceBounds())
+    lastLocalEdit = Date()
+    let params = core.buildSetPilotParams(state, bounds: deviceBounds(), whiteMix: whiteMix)
     client.apply(state: state, params: params)
     if state.mode == .rgb, !activeMac.isEmpty { stores.saveDeviceRgb(state.rgb, forMac: activeMac) }
     bump()
   }
 
-  /// Toggle power. Updates local state immediately for snappy UI, then sends.
+  /// Toggle power. Turning on restores the last settled brightness (so it doesn't
+  /// return at the ~1% passed through on the way to off) and re-sends the full
+  /// state; turning off is a bare power-off.
   func setPower(_ on: Bool) {
-    state.on = on
-    guard let client = client else { bump(); return }
-    client.power(on)
-    bump()
+    lastLocalEdit = Date()
+    if on {
+      if lastBrightness > 0 { setBrightness(lastBrightness) }  // also recomputes Warm Glow temp
+      state.on = true
+      applyLive()
+    } else {
+      state.on = false
+      guard let client = client else { bump(); return }
+      client.power(false)
+      bump()
+    }
   }
 
   /// Apply a preset to the current state (via the engine), then send it.

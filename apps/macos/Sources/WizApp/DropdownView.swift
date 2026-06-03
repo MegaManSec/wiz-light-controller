@@ -9,12 +9,13 @@ import WizKit
 /// buttons in the header, mirroring the Control Center panel.
 struct DropdownView: View {
   @EnvironmentObject var app: AppState
+  @ObservedObject private var updates = UpdateChecker.shared
   var onOpenControls: () -> Void = {}
   var onQuit: () -> Void = {}
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      if UpdateChecker.shared.updateAvailable, let latest = UpdateChecker.shared.latestVersion {
+      if updates.updateAvailable, let latest = updates.latestVersion {
         updateRow(latest)
       }
       header

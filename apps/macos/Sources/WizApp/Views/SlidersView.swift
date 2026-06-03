@@ -93,7 +93,9 @@ struct SlidersView: View {
         valueText: "\(Int(hsv.v))%",
         value: Binding(
           get: { app.hsv.v },
-          set: { app.setHSV(h: app.hsv.h, s: app.hsv.s, v: $0) }),
+          // Floor at 1: value 0 is pure black, which the bulb can't show, so
+          // `setRGB` rejects it — without the floor the thumb would stick at 0.
+          set: { app.setHSV(h: app.hsv.h, s: app.hsv.s, v: max(1, $0)) }),
         range: 0...100,
         colors: [valColor(0), valColor(100)])
     }

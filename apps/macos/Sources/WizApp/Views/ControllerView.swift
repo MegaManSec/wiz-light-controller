@@ -60,7 +60,7 @@ struct ControllerView: View {
           .padding(.top, 8)
         } else {
           Label(
-            "No light selected. Enter a WiZ IP above or Discover a light.",
+            "No light selected. Choose a saved light above, or Discover one.",
             systemImage: "wifi.slash"
           )
           .foregroundStyle(.secondary)
@@ -72,59 +72,78 @@ struct ControllerView: View {
   }
 }
 
-// MARK: - Connection bar (IP + discover + status)
+// MARK: - Connection bar (saved-light picker + discover + status)
 
-/// IP entry, a Discover button (opens the discovery sheet), and a live
-/// connection dot. Mirrors the Python app's top bar.
+/// A saved-light dropdown (locked while connected), a Connect/Disconnect button, a
+/// Discover button, and a live connection dot. Lights are added via Discover →
+/// Save; you connect by choosing one here after disconnecting any current light.
 struct ConnectionBar: View {
   @EnvironmentObject var app: AppState
-  @State private var ipText = ""
   @State private var showDiscovery = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack(spacing: 8) {
-        Text("WiZ IP")
-          .font(.headline)
-        TextField("192.168.1.50", text: $ipText)
-          .textFieldStyle(.roundedBorder)
-          .frame(maxWidth: 200)
-          .onSubmit(commitIp)
-        Button {
-          showDiscovery = true
-        } label: {
-          Label("Discover", systemImage: "wifi")
+    HStack(spacing: 8) {
+      Text("Light")
+      Picker("Light", selection: lightBinding) {
+        Text(app.savedLights.isEmpty ? "No saved lights" : "Choose a light…").tag("")
+        ForEach(app.savedLights.sorted { $0.value.name < $1.value.name }, id: \.key) { mac, light in
+          Text(light.name).tag(mac)
         }
-        .help("Scan the local network for WiZ lights.")
+      }
+      .labelsHidden()
+      .frame(maxWidth: 200)
+      .disabled(app.connected)
+      .help("Choose a saved light, then Connect.")
+      .overlay {
+        // A disabled control doesn't surface its own tooltip, so when connected
+        // overlay a transparent hover area explaining why it's locked.
         if app.connected {
-          Button {
-            app.disconnect()
-          } label: {
-            Label("Disconnect", systemImage: "wifi.slash")
-          }
-          .help("Stop controlling this light.")
-        } else if app.hasLight {
-          Button {
-            app.reconnect()
-          } label: {
-            Label("Connect", systemImage: "link")
-          }
-          .help("Connect to this light and load its colour and brightness.")
+          Color.clear.contentShape(Rectangle())
+            .help("Disconnect before selecting lights.")
         }
-        Spacer()
-        statusDot
       }
-      if app.displayName != app.selectedIp {
-        Text(app.displayName)
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
+
+      if app.connected {
+        Button {
+          app.disconnect()
+        } label: {
+          Label("Disconnect", systemImage: "wifi.slash")
+        }
+        .help("Stop controlling this light.")
+      } else {
+        Button {
+          app.reconnect()
+        } label: {
+          Label("Connect", systemImage: "link")
+        }
+        .disabled(!app.hasLight)
+        .help("Connect to the selected light.")
       }
+
+      Button {
+        showDiscovery = true
+      } label: {
+        Label("Discover", systemImage: "wifi")
+      }
+      .help("Scan the local network for WiZ lights.")
+
+      Spacer()
+      statusDot
     }
-    .onAppear { ipText = app.selectedIp }
-    .onChange(of: app.selectedIp) { ipText = $0 }
     .sheet(isPresented: $showDiscovery) {
       DiscoveryView().environmentObject(app)
     }
+  }
+
+  /// The dropdown selects (without connecting) a saved light by MAC; the Connect
+  /// button then connects to it.
+  private var lightBinding: Binding<String> {
+    Binding(
+      get: { app.selectedMac },
+      set: { mac in
+        guard let light = app.savedLights[mac] else { return }
+        app.selectLight(name: light.name, ip: light.ip, mac: mac, connect: false)
+      })
   }
 
   private var statusDot: some View {
@@ -136,18 +155,6 @@ struct ConnectionBar: View {
         .font(.caption)
         .foregroundStyle(.secondary)
     }
-  }
-
-  private func commitIp() {
-    let trimmed = ipText.trimmingCharacters(in: .whitespaces)
-    guard app.core.isValidIp(trimmed) else { return }
-    // Keep a matching saved light's name/MAC if we have one for this IP.
-    if let (mac, light) = app.savedLights.first(where: { $0.value.ip == trimmed }) {
-      app.selectLight(name: light.name, ip: trimmed, mac: mac)
-    } else {
-      app.selectLight(name: trimmed, ip: trimmed, mac: "")
-    }
-    // selectLight already attempts to connect.
   }
 }
 

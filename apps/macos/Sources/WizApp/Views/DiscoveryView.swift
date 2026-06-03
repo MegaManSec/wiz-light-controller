@@ -12,6 +12,12 @@ struct DiscoveryView: View {
   @State private var renamingMac: String?
   @State private var renameText = ""
 
+  /// Discovered lights that aren't already saved (saved ones appear under "Saved",
+  /// matched by MAC).
+  private var unsavedDiscovered: [Discovery.Light] {
+    app.discovered.filter { app.savedLights[$0.mac] == nil }
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       header
@@ -21,16 +27,19 @@ struct DiscoveryView: View {
           Section("Saved") {
             ForEach(app.savedLights.sorted { $0.value.name < $1.value.name }, id: \.key) { mac, light in
               savedRow(mac: mac, light: light)
+                .listRowSeparator(.hidden)
             }
           }
         }
         Section(app.isDiscovering ? "Discovering…" : "Found") {
-          if app.discovered.isEmpty {
-            Text(app.isDiscovering ? "Scanning the network…" : "No lights found yet. Tap Scan.")
+          if unsavedDiscovered.isEmpty {
+            Text(app.isDiscovering ? "Scanning the network…" : "No new lights found. Tap Scan.")
               .foregroundStyle(.secondary)
+              .listRowSeparator(.hidden)
           }
-          ForEach(app.discovered, id: \.mac) { light in
+          ForEach(unsavedDiscovered, id: \.mac) { light in
             discoveredRow(light)
+              .listRowSeparator(.hidden)
           }
         }
       }
@@ -64,41 +73,64 @@ struct DiscoveryView: View {
 
   @ViewBuilder
   private func savedRow(mac: String, light: Stores.SavedLight) -> some View {
+    let connectedToThis = mac == app.selectedMac && app.connected
+    let renaming = renamingMac == mac
     HStack {
-      Image(systemName: mac == app.selectedMac ? "checkmark.circle.fill" : "lightbulb")
-        .foregroundStyle(mac == app.selectedMac ? Color.green : Color.secondary)
-      if renamingMac == mac {
-        TextField("Name", text: $renameText, onCommit: {
-          app.renameSavedLight(mac: mac, name: renameText)
-          renamingMac = nil
-        })
-        .textFieldStyle(.roundedBorder)
+      Image(systemName: connectedToThis ? "checkmark.circle.fill" : "lightbulb")
+        .foregroundStyle(connectedToThis ? Color.green : Color.secondary)
+      if renaming {
+        TextField("Name", text: $renameText)
+          .textFieldStyle(.roundedBorder)
+          .onSubmit { commitRename(mac) }
+          .onExitCommand { renamingMac = nil }  // Escape cancels without saving
       } else {
         VStack(alignment: .leading) {
           Text(light.name)
-          Text(light.ip).font(.caption).foregroundStyle(.secondary)
+          Text("\(light.ip) · \(app.core.formatMac(mac))")
+            .font(.caption).foregroundStyle(.secondary)
         }
       }
       Spacer()
-      Button("Select") {
-        app.selectLight(name: light.name, ip: light.ip, mac: mac)
-        if app.settings.autoSync { app.sync() }
-        dismiss()
+      if renaming {
+        Button("Save") { commitRename(mac) }
+          .buttonStyle(.bordered)
+        Button("Cancel") { renamingMac = nil }
+          .buttonStyle(.bordered)
+      } else {
+        Button(connectedToThis ? "Disconnect" : "Connect") {
+          if connectedToThis {
+            app.disconnect()
+          } else {
+            app.selectLight(name: light.name, ip: light.ip, mac: mac)
+          }
+        }
+        .buttonStyle(.bordered)
+        Menu {
+          Button("Rename") { renamingMac = mac; renameText = light.name }
+          Button("Remove", role: .destructive) {
+            app.removeSavedLight(mac: mac)
+            app.discover()  // rescan so a removed light (if online) returns under "Found"
+          }
+        } label: {
+          Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 28)
       }
-      Menu {
-        Button("Rename") { renamingMac = mac; renameText = light.name }
-        Button("Remove", role: .destructive) { app.removeSavedLight(mac: mac) }
-      } label: {
-        Image(systemName: "ellipsis.circle")
-      }
-      .menuStyle(.borderlessButton)
-      .frame(width: 28)
     }
+  }
+
+  /// Commit a rename — the deliberate save (Save button or Enter). Escaping or
+  /// clicking away leaves the name unchanged.
+  private func commitRename(_ mac: String) {
+    let trimmed = renameText.trimmingCharacters(in: .whitespaces)
+    if !trimmed.isEmpty { app.renameSavedLight(mac: mac, name: trimmed) }
+    renamingMac = nil
   }
 
   @ViewBuilder
   private func discoveredRow(_ light: Discovery.Light) -> some View {
-    let isSaved = !light.mac.isEmpty && app.savedLights[light.mac] != nil
     HStack {
       Image(systemName: "lightbulb")
         .foregroundStyle(.secondary)
@@ -108,16 +140,14 @@ struct DiscoveryView: View {
           .font(.caption).foregroundStyle(.secondary)
       }
       Spacer()
-      Button("Select") {
-        app.selectLight(name: light.name, ip: light.ip, mac: light.mac)
-        if app.settings.autoSync { app.sync() }
-        dismiss()
-      }
-      if !isSaved, !light.mac.isEmpty {
+      // Found lights can only be saved; selecting/connecting happens from Saved.
+      if light.mac.isEmpty {
+        Text("No MAC").font(.caption).foregroundStyle(.tertiary)
+      } else {
         Button("Save") {
-          app.selectLight(name: light.name, ip: light.ip, mac: light.mac)
-          app.saveCurrentLight(name: light.name)
+          app.saveLight(name: light.name, ip: light.ip, mac: light.mac)
         }
+        .buttonStyle(.bordered)
       }
     }
   }

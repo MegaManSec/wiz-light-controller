@@ -246,16 +246,13 @@ final class AppState: ObservableObject {
     savedLights = stores.loadSavedLights()
     presets = stores.loadPresets(defaults: core.defaultPresets())
 
+    // Only restore a *saved* light (lights are added via Discover → Save): the
+    // last-used one by IP, else any saved light. With nothing saved, nothing is
+    // selected — so we never show a phantom "press Connect to control …" for a
+    // light that isn't saved.
     let lastIp = stores.loadLastIp()
-    if !lastIp.isEmpty {
-      // Prefer a saved light matching that IP (so we get its friendly name + MAC);
-      // otherwise select by IP alone — no friendly name, so `displayName` falls
-      // back to the bulb's remembered module name, restored just below.
-      if let (mac, light) = savedLights.first(where: { $0.value.ip == lastIp }) {
-        selectLight(name: light.name, ip: light.ip, mac: mac, persistIp: false)
-      } else {
-        selectLight(name: "", ip: lastIp, mac: "", persistIp: false)
-      }
+    if !lastIp.isEmpty, let (mac, light) = savedLights.first(where: { $0.value.ip == lastIp }) {
+      selectLight(name: light.name, ip: light.ip, mac: mac, persistIp: false)
     } else if let (mac, light) = savedLights.first {
       selectLight(name: light.name, ip: light.ip, mac: mac, persistIp: false)
     }
@@ -291,7 +288,9 @@ final class AppState: ObservableObject {
   // MARK: - Light selection
 
   /// Point the app at a light. Rebuilds the per-host client and remembers the IP.
-  func selectLight(name: String, ip: String, mac: String, persistIp: Bool = true) {
+  func selectLight(
+    name: String, ip: String, mac: String, persistIp: Bool = true, connect: Bool = true
+  ) {
     // An empty name is kept empty (not defaulted to the IP) so `displayName` can
     // fall back to the bulb's module name instead of rendering "IP — IP".
     selectedName = name
@@ -310,12 +309,22 @@ final class AppState: ObservableObject {
       deviceSummary = ""
       dimToWarmCurve = AppState.defaultDimToWarm
       warmGlow = false
+      rgbMemory = nil
+      whiteTempMemory = nil
       configHost = nil
     }
-    bump()
-    // Selecting a light attempts to connect (and reflect its state), so a valid,
-    // reachable IP turns green without a manual sync.
-    if hasLight { sync() }
+    if connect {
+      bump()
+      // Selecting a light attempts to connect (and reflect its state), so a valid,
+      // reachable IP turns green without a manual sync.
+      if hasLight { sync() }
+    } else {
+      // Selected without connecting — leave it disconnected until the user
+      // explicitly connects (Controls → Connect), and don't auto-reconnect.
+      manuallyDisconnected = true
+      connected = false
+      bump()
+    }
   }
 
   /// True when an IP is set and valid.
@@ -608,6 +617,15 @@ final class AppState: ObservableObject {
     bump()
   }
 
+  /// Save a specific discovered light (by MAC) without selecting or connecting —
+  /// the Found → Save step. It then appears under Saved, where it can be selected.
+  func saveLight(name: String, ip: String, mac: String) {
+    guard !mac.isEmpty else { return }
+    savedLights[mac] = Stores.SavedLight(name: name, ip: ip)
+    stores.saveSavedLights(savedLights)
+    bump()
+  }
+
   func renameSavedLight(mac: String, name: String) {
     guard var light = savedLights[mac] else { return }
     light.name = name
@@ -620,6 +638,12 @@ final class AppState: ObservableObject {
   func removeSavedLight(mac: String) {
     savedLights.removeValue(forKey: mac)
     stores.saveSavedLights(savedLights)
+    if mac == selectedMac {
+      // Removed the light we're using: clear the selection + disconnect, and forget
+      // it as the last-used light, so nothing shows as selected or connected.
+      stores.saveLastIp("")
+      selectLight(name: "", ip: "", mac: "", persistIp: false, connect: false)
+    }
     bump()
   }
 

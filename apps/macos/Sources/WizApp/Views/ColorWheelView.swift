@@ -75,7 +75,14 @@ final class WheelNSView: NSView {
   override func draw(_ dirtyRect: NSRect) {
     let img = cached ?? renderWheel()
     cached = img
+    // Clip to a circle so the rim is smoothly anti-aliased instead of showing the
+    // bitmap's stair-stepped edge, and interpolate the upscaled fill on Retina.
+    // The marker is drawn after the clip is lifted so it can sit right on the rim.
+    NSGraphicsContext.current?.saveGraphicsState()
+    NSGraphicsContext.current?.imageInterpolation = .high
+    NSBezierPath(ovalIn: bounds).addClip()
     img.draw(in: bounds)
+    NSGraphicsContext.current?.restoreGraphicsState()
     drawMarker()
   }
 
@@ -84,23 +91,19 @@ final class WheelNSView: NSView {
   private func renderWheel() -> NSImage {
     guard let core = core else { return NSImage(size: bounds.size) }
     let dim = Int(size)
-    let radius = Double(dim) / 2
     var pixels = [UInt8](repeating: 0, count: dim * dim * 4)
 
+    // Colour every pixel inside the disc; the circular edge is smoothed by the
+    // anti-aliased clip in `draw`, so the bitmap itself needs no rim feathering.
     for y in 0..<dim {
       for x in 0..<dim {
         guard let hs = core.wheelToHS(x: Double(x), y: Double(y), size: size) else { continue }
         let rgb = core.hsvToRgb([hs.h, hs.s, 1.0])
-        // Feather the rim by one pixel to avoid hard aliasing.
-        let dx = Double(x) - radius
-        let dy = Double(y) - radius
-        let dist = (dx * dx + dy * dy).squareRoot()
-        let alpha: UInt8 = dist > radius ? 0 : (dist > radius - 1.5 ? 160 : 255)
         let i = (y * dim + x) * 4
         pixels[i] = UInt8(clamping: rgb[0])
         pixels[i + 1] = UInt8(clamping: rgb[1])
         pixels[i + 2] = UInt8(clamping: rgb[2])
-        pixels[i + 3] = alpha
+        pixels[i + 3] = 255
       }
     }
 
@@ -135,8 +138,20 @@ final class WheelNSView: NSView {
 
   private func pick(_ event: NSEvent) {
     guard let core = core else { return }
-    let p = convert(event.locationInWindow, from: nil)
-    guard let hs = core.wheelToHS(x: Double(p.x), y: Double(p.y), size: size) else { return }
+    let raw = convert(event.locationInWindow, from: nil)
+    // A drag that leaves the disc would otherwise return nil and freeze the
+    // marker. Clamp it to just inside the rim so it keeps tracking the angle,
+    // stuck at the outermost edge (full saturation), until the mouse comes back.
+    let c = Double(size) / 2
+    var x = Double(raw.x), y = Double(raw.y)
+    let dx = x - c, dy = y - c
+    let dist = (dx * dx + dy * dy).squareRoot()
+    if dist > c - 0.5 {
+      let f = (c - 0.5) / dist
+      x = c + dx * f
+      y = c + dy * f
+    }
+    guard let hs = core.wheelToHS(x: x, y: y, size: size) else { return }
     onPick?(hs.h, hs.s)
   }
 }

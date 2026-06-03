@@ -729,6 +729,10 @@ final class AppState: ObservableObject {
   /// Set RGB directly (slider / entry edits), clamp to bytes, re-send.
   func setRGB(_ rgb: [Int]) {
     let clamped = rgb.map { max(0, min(255, $0)) }
+    // Black isn't a colour the bulb can show (it'd just be off), so reject it.
+    // Every colour path (wheel / RGB / HSV / hex) funnels through here, so this
+    // guards them all.
+    if clamped == [0, 0, 0] { return }
     state.rgb = clamped
     state.mode = .rgb
     applyLive()

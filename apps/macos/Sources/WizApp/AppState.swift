@@ -234,7 +234,12 @@ final class AppState: ObservableObject {
   /// implementation (stretches the curve's clamped Kelvin span across the whole
   /// brightness range).
   func kelvinForBrightness(_ brightness: Int) -> Int {
-    core.warmGlowKelvin(brightness, curve: dimToWarmCurve, range: tempRange)
+    // Brightness 0 is "off", so the usable Warm Glow range is 1…100 — map that
+    // onto the curve's full span so 1 lands on the device's warmest temperature
+    // (e.g. 2700 K) and 100 on its coolest, rather than 1 sitting just above warm.
+    let usable = max(1, min(100, brightness))
+    let scaled = Int((Double(usable - 1) / 99 * 100).rounded())
+    return core.warmGlowKelvin(scaled, curve: dimToWarmCurve, range: tempRange)
   }
 
   // MARK: - Persistence
@@ -570,12 +575,20 @@ final class AppState: ObservableObject {
   /// Apply a preset to the current state (via the engine), then send it.
   func applyPreset(_ preset: Preset) {
     state = core.applyPreset(state, preset)
+    // Presets carry fixed temperatures that can fall outside this bulb's range
+    // (e.g. 2200K on a 2700K-min strip), so clamp to the negotiated device range.
+    if state.mode == .white { state.temp = clampTemp(state.temp) }
+    commitBrightnessMemory()
     applyLive()
   }
 
   /// True if the live state matches `preset` (drives the active highlight).
   func isActive(_ preset: Preset) -> Bool {
-    core.stateMatchesPreset(state, preset)
+    var p = preset
+    // Match against the device-clamped temperature (presets can specify a temp
+    // outside this bulb's range), so the preset you applied still highlights.
+    if p.mode == .white, let temp = p.temp { p.temp = clampTemp(temp) }
+    return core.stateMatchesPreset(state, p)
   }
 
   /// Save the current state as a preset under `name` in the current mode,
@@ -605,6 +618,36 @@ final class AppState: ObservableObject {
     presets[preset.mode]?.removeAll { $0.name == preset.name }
     stores.savePresets(presets)
     bump()
+  }
+
+  // MARK: - Warm Glow presets
+
+  /// Warm Glow presets are brightness levels (the temperature auto-follows the
+  /// dim-to-warm curve), so they live here — Warm Glow is a UI mode — rather than
+  /// in the engine's RGB/white presets.
+  struct WarmGlowPreset: Identifiable {
+    let name: String
+    let brightness: Int
+    var id: String { name }
+  }
+
+  let warmGlowPresets: [WarmGlowPreset] = [
+    .init(name: "Candle", brightness: 10),
+    .init(name: "Ember", brightness: 30),
+    .init(name: "Cozy", brightness: 55),
+    .init(name: "Hearth", brightness: 80),
+    .init(name: "Glow", brightness: 100),
+  ]
+
+  /// Apply a Warm Glow preset: switch to Warm Glow at its brightness (the
+  /// temperature follows), turn on, and send.
+  func applyWarmGlowPreset(_ preset: WarmGlowPreset) {
+    warmGlow = true
+    state.mode = .white
+    state.on = true
+    setBrightness(preset.brightness)
+    commitBrightnessMemory()
+    applyLive()
   }
 
   // MARK: - Saved lights

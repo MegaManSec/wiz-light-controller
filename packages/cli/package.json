@@ -3,6 +3,22 @@
   "version": "0.1.0",
   "description": "Fast, local, cloud-free command-line controller for Philips WiZ lights.",
   "license": "GPL-3.0-or-later",
+  "homepage": "https://github.com/MegaManSec/wiz-light-controller#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MegaManSec/wiz-light-controller.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/MegaManSec/wiz-light-controller/issues"
+  },
+  "author": {
+    "name": "Joshua Rogers",
+    "url": "https://joshua.hu/"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "wiz": "src/index.js"

@@ -4,6 +4,18 @@
   "private": true,
   "description": "Fast, local, cloud-free controller for Philips WiZ lights — a modular JavaScript engine (reused by a CLI and a native macOS app via JavaScriptCore).",
   "license": "GPL-3.0-or-later",
+  "homepage": "https://github.com/MegaManSec/wiz-light-controller#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MegaManSec/wiz-light-controller.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MegaManSec/wiz-light-controller/issues"
+  },
+  "author": {
+    "name": "Joshua Rogers",
+    "url": "https://joshua.hu/"
+  },
   "type": "module",
   "engines": {
     "node": ">=24.0.0"

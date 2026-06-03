@@ -79,7 +79,7 @@ See [`apps/macos`](apps/macos/README.md) for the app's full security, signing, a
 ## Requirements
 
 - **Node 24** and **pnpm 10** (pinned; use Corepack).
-- **macOS app:** **Xcode 16+** on **macOS 13+** (Apple frameworks only — no third-party Swift dependencies).
+- **macOS app:** **Xcode 15+** on **macOS 13+** (Apple frameworks only — no third-party Swift dependencies).
 - Your machine on the **same LAN** as the bulbs.
 
 ## Packages

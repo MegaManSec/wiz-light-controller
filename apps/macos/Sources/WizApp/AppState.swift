@@ -559,8 +559,22 @@ final class AppState: ObservableObject {
     lastLocalEdit = Date()
     let params = core.buildSetPilotParams(state, bounds: deviceBounds(), whiteMix: whiteMix)
     client.apply(state: state, params: params)
-    if state.mode == .rgb, !activeMac.isEmpty { stores.saveDeviceRgb(state.rgb, forMac: activeMac) }
+    if state.mode == .rgb { scheduleDeviceRgbSave() }
     bump()
+  }
+
+  /// Coalesce the per-device "last colour" persistence. A colour drag calls
+  /// `applyLive` every frame, but the on-disk RGB only needs the settled value, so
+  /// debounce the write — the live network send is already debounced in WizClient.
+  private var rgbSaveGen = 0
+  private func scheduleDeviceRgbSave() {
+    guard !activeMac.isEmpty else { return }
+    rgbSaveGen += 1
+    let (gen, rgb, mac) = (rgbSaveGen, state.rgb, activeMac)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+      guard let self, gen == self.rgbSaveGen else { return }
+      self.stores.saveDeviceRgb(rgb, forMac: mac)
+    }
   }
 
   /// Toggle power. Turning on restores the last settled brightness (so it doesn't

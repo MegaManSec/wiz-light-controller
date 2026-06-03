@@ -33,6 +33,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write # create the tag + GitHub Release
+      id-token: write # OIDC for npm trusted publishing + provenance
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -83,6 +84,27 @@ jobs:
           # each workspace package from its own directory into the shared dir.
           ( cd packages/core && pnpm pack --pack-destination "$dest" )
           ( cd packages/cli && pnpm pack --pack-destination "$dest" )
+
+      - name: Publish to npm (OIDC trusted publishing)
+        if: steps.gate.outputs.version != ''
+        # No NPM_TOKEN: npm trades this workflow's OIDC token for short-lived
+        # credentials via the per-package "Trusted Publisher" configured on npmjs.
+        # Runs before the tag/Release below so a failure here stays fully
+        # retryable (the gate keys off the tag, which isn't created yet). The
+        # tarballs already have `workspace:*` resolved by `pnpm pack`. Idempotent:
+        # a version already on the registry is skipped (e.g. the bootstrap 0.1.0),
+        # so core publishes before cli and re-runs are safe.
+        env:
+          VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          npm install -g npm@latest # OIDC trusted publishing needs npm >= 11.5.1
+          for pkg in wiz-light-core wiz-light-cli; do
+            if npm view "$pkg@$VERSION" version >/dev/null 2>&1; then
+              echo "$pkg@$VERSION already on npm — skipping."
+            else
+              npm publish "artifacts/$pkg-$VERSION.tgz" --access public --provenance
+            fi
+          done
 
       - name: Create GitHub Release
         if: steps.gate.outputs.version != ''

@@ -5,7 +5,7 @@ A native menu-bar app for Philips WiZ lights. The colour maths and light-state m
 ## Layout
 
 - `Sources/WizKit/` — the engine layer. `WizCore` bridges the JS bundle; `WizClient` (UDP `setPilot`/`getPilot`, debounced + retried), `Discovery` (broadcast `getSystemConfig`), and `Stores` (persistence) are the Swift transport.
-- `Sources/WizApp/` — the SwiftUI/AppKit menu-bar app: a status item + menu, and a manual controller window (colour wheel, RGB/HSV/hex sliders, brightness, white temperature, presets, discovery, settings).
+- `Sources/WizApp/` — the SwiftUI/AppKit menu-bar app: a status item + SwiftUI dropdown popover (`DropdownView`), and a controller window (colour wheel, RGB/HSV/hex sliders, brightness, white temperature, presets, discovery, settings).
 - `build/` — packaging inputs: `Info.plist`, `WizLightController.entitlements`.
 - `Makefile` — build / icon / bundle / sign.
 
@@ -21,7 +21,7 @@ make -C apps/macos run                      # open the assembled app
 
 `make app` runs a release build, generates `build/AppIcon.icns` from `../../assets/app_iconhigh.png`, assembles the `.app`, copies the JS engine bundle (`wiz-core.global.js`) into `Contents/Resources/` so `WizCore` finds it via `Bundle.main` at runtime, and codesigns the result.
 
-The app is a menu-bar (`LSUIElement`) app — it has no Dock icon until you open the controller window. Click the menu-bar bulb to control the light; "Open WiZ Light Controller…" brings up the full window.
+The app is a menu-bar (`LSUIElement`) app — it has no Dock icon until you open the controller window. Click the menu-bar bulb for a quick dropdown (power, brightness, and colour / white-temperature, with an RGB / White / Warm Glow mode switch); the controls button in its header opens the full window, which adds the colour wheel, presets (including Warm Glow levels), a "Brighter colours" white-LED blend, and discovery / settings.
 
 > Note: the JavaScriptCore bundle is generated from `wiz-light-core` by `pnpm build:jscore` (run from the repo root) — regenerate it before building if you've changed the engine.
 

@@ -6,13 +6,11 @@ name: macOS Build
 # (`pnpm build:jscore`) before `swift build`/`swift test` and `make app`.
 #
 # Triggers:
-#   - push of a `v*` tag   → build + attach to the matching Release.
-#   - workflow_dispatch     → manual build (also the supported way to (re)build
-#     a tag). The Release workflow tags with the default GITHUB_TOKEN, and a tag
-#     pushed by that token does NOT auto-trigger other workflows (GitHub
-#     suppresses that to avoid recursion). So after a release cut this workflow
-#     is started manually via `gh workflow run macos-build.yml --ref vX.Y.Z`
-#     (or the Actions UI) against the new tag.
+#   - workflow_call         → release.yml calls this after cutting a release,
+#     passing `release-tag`, so the app builds + attaches to that Release in the
+#     same run (no GITHUB_TOKEN tag-trigger dance, no long-lived PAT).
+#   - workflow_dispatch     → manual (re)build; run it against a tag to build and
+#     attach that release's app, e.g. `gh workflow run macos-build.yml --ref vX.Y.Z`.
 #
 # Signing & notarization are GATED on repository secrets. With them present the
 # Makefile signs with a Developer ID Application certificate (hardened runtime)
@@ -25,9 +23,12 @@ name: macOS Build
 #   - APPLE_TEAM_ID                10-character Apple Developer Team ID
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_call:
+    inputs:
+      release-tag:
+        description: The vX.Y.Z tag to build the app from and attach it to.
+        type: string
+        required: true
   workflow_dispatch:
 
 # No ambient token: the one job opts back in to exactly what it needs.
@@ -56,6 +57,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
+          # Build the released tag when called by release.yml (release-tag), else
+          # whatever ref a manual dispatch targeted.
+          ref: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
           persist-credentials: false
 
       - name: Set up Node.js
@@ -154,11 +158,12 @@ jobs:
           path: ${{ steps.zip.outputs.path }}
 
       - name: Attach to Release
-        # Only on a real tag: upload (clobbering on a re-run) the zip to the
-        # Release the Release workflow created for this tag.
-        if: startsWith(github.ref, 'refs/tags/v')
+        # Upload (clobbering on a re-run) the zip to the Release for this tag: the
+        # `release-tag` passed by release.yml, or the tag a manual dispatch
+        # targeted. Skipped when dispatched against a non-tag ref (e.g. main).
+        if: ${{ inputs.release-tag != '' || startsWith(github.ref, 'refs/tags/v') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
           ZIP_PATH: ${{ steps.zip.outputs.path }}
         run: gh release upload "$TAG" "$ZIP_PATH" --clobber

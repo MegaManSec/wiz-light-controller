@@ -3,7 +3,7 @@
 // stays clean and machine-parseable.
 
 /** True when it's safe to emit ANSI escapes. */
-export const colorEnabled = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+export const colorEnabled = Boolean(process.stdout.isTTY) && !('NO_COLOR' in process.env);
 
 const wrap = (open, close) => (text) =>
   colorEnabled ? `[${open}m${text}[${close}m` : String(text);

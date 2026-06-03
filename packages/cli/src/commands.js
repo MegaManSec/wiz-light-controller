@@ -48,11 +48,23 @@ async function resolveIp(positional, stores) {
 /** Parse and validate the optional `--brightness` flag, or return undefined. */
 function parseBrightness(values) {
   if (values.brightness === undefined) return undefined;
+  // A value-less `--brightness` parses (non-strict argv) as boolean `true`, which
+  // `Number(true)` would silently turn into 1 — require an actual value instead.
+  if (typeof values.brightness !== 'string') fail('--brightness needs a value from 0 to 100.');
   const n = Number(values.brightness);
   if (!Number.isFinite(n) || n < 0 || n > 100) {
     fail('--brightness must be a number from 0 to 100.');
   }
   return clampBrightness(n);
+}
+
+/** Parse an optional positive-integer flag (e.g. `--attempts`, `--timeout`). */
+function parsePositiveInt(value, label) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') fail(`--${label} needs a positive number.`);
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) fail(`--${label} must be a positive number.`);
+  return Math.floor(n);
 }
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -110,8 +122,10 @@ function presetLine(name, p) {
 // ---------- commands ----------
 
 async function cmdDiscover({ values }) {
-  const timeoutMs = values.timeout ? Number(values.timeout) : undefined;
-  const attempts = values.attempts ? Number(values.attempts) : undefined;
+  // Validate up front: a non-numeric `--attempts` would otherwise become NaN and
+  // make discovery loop forever.
+  const timeoutMs = parsePositiveInt(values.timeout, 'timeout');
+  const attempts = parsePositiveInt(values.attempts, 'attempts');
   const lights = await discover({ timeoutMs, attempts });
 
   if (values.json) {

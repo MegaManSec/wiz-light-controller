@@ -18,7 +18,10 @@ EXECUTABLE := WizApp
 RELEASE_BIN := .build/release/$(EXECUTABLE)
 JS_BUNDLE := Sources/WizKit/Resources/wiz-core.global.js
 ICON_SRC := $(REPO_ROOT)/assets/app_iconhigh.png
-CODESIGN_IDENTITY ?= -
+# Ad-hoc ("-") by default. Pass a Developer ID via CODESIGN_IDENTITY; an unset or
+# empty value (e.g. CI passing an unconfigured secret) falls back to ad-hoc — an
+# env/CLI var set to "" is still "defined", so a plain `?=` wouldn't catch it.
+override CODESIGN_IDENTITY := $(if $(strip $(CODESIGN_IDENTITY)),$(CODESIGN_IDENTITY),-)
 
 .PHONY: bundle build icon app run clean
 

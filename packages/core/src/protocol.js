@@ -109,6 +109,10 @@ export class WizLight {
   #timer = null;
   #pending = null;
   #sendGen = 0;
+  // One shared deferred per debounce window, so every send() call coalesced into
+  // that window settles together (see send/close) instead of a superseded call
+  // hanging forever on its cleared timer.
+  #deferred = null;
 
   constructor(host, options = {}) {
     assertHost(host);
@@ -145,19 +149,32 @@ export class WizLight {
   /**
    * Schedule `params` to be sent after the debounce window. Repeated calls
    * within the window replace the previous payload — only the latest is sent.
-   * Returns a promise that resolves when that send completes.
+   * Every call coalesced into one window shares a single promise that settles
+   * when that window's send completes (or resolves early if {@link close}
+   * cancels it), so an awaited call never hangs just because a later call
+   * superseded it.
    */
   send(params) {
     this.#pending = params;
     if (this.#timer) clearTimeout(this.#timer);
-    return new Promise((resolve, reject) => {
-      this.#timer = setTimeout(() => {
-        this.#timer = null;
-        const next = this.#pending;
-        this.#pending = null;
-        this.sendNow(next).then(resolve, reject);
-      }, this.debounceMs);
-    });
+    if (!this.#deferred) {
+      let resolve;
+      let reject;
+      const promise = new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      this.#deferred = { promise, resolve, reject };
+    }
+    const deferred = this.#deferred;
+    this.#timer = setTimeout(() => {
+      this.#timer = null;
+      this.#deferred = null;
+      const next = this.#pending;
+      this.#pending = null;
+      this.sendNow(next).then(deferred.resolve, deferred.reject);
+    }, this.debounceMs);
+    return deferred.promise;
   }
 
   /** Convenience: build and send the wire params for a desired {@link LightState}. */
@@ -170,10 +187,17 @@ export class WizLight {
     return this.send({ state: Boolean(on) });
   }
 
-  /** Cancel any pending debounced send. */
+  /**
+   * Cancel any pending debounced send. A still-pending {@link send} promise is
+   * resolved (the send was cancelled, not failed), so awaiters don't hang.
+   */
   close() {
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
     this.#pending = null;
+    if (this.#deferred) {
+      this.#deferred.resolve();
+      this.#deferred = null;
+    }
   }
 }

@@ -274,10 +274,11 @@ describe('protocol: WizLight.send (debounced)', () => {
 
   it('coalesces rapid calls and sends only the latest payload', async () => {
     const { light, sockets } = makeLight();
-    // Each superseded call returns a promise whose debounce timer is cleared, so
-    // it never settles — void those; only the final call's promise resolves.
-    void light.send({ state: true, r: 1 }).catch(() => {});
-    void light.send({ state: true, r: 2 }).catch(() => {});
+    // Every call coalesced into one debounce window shares a single promise, so
+    // the earlier handles settle together with the final send (no hang); the
+    // awaited `promise` below is that same shared promise.
+    void light.send({ state: true, r: 1 });
+    void light.send({ state: true, r: 2 });
     const promise = light.send({ state: true, r: 3 });
 
     await flush();
@@ -295,6 +296,19 @@ describe('protocol: WizLight.send (debounced)', () => {
     for (const s of sockets) {
       assert.deepEqual(s.sent[0].message.params, { state: true, r: 3 });
     }
+  });
+
+  it('settles a superseded send rather than leaving it hung', async () => {
+    const { light } = makeLight();
+    const superseded = light.send({ state: true, r: 1 });
+    const latest = light.send({ state: true, r: 2 }); // supersedes within the window
+    mock.timers.tick(250);
+    await flush();
+    mock.timers.tick(120);
+    await flush();
+    // The superseded handle must settle alongside the final coalesced send — not
+    // hang forever on its cleared debounce timer.
+    await Promise.all([superseded, latest]);
   });
 
   it('apply() builds and debounces the wire params for a state', async () => {
@@ -317,7 +331,7 @@ describe('protocol: WizLight.send (debounced)', () => {
 
   it('power() debounces a bare on/off state', async () => {
     const { light, sockets } = makeLight();
-    void light.power(true).catch(() => {}); // superseded within the window
+    void light.power(true); // superseded within the window — shares `promise` below
     const promise = light.power(false);
     mock.timers.tick(250);
     await flush();
@@ -328,11 +342,11 @@ describe('protocol: WizLight.send (debounced)', () => {
     for (const s of sockets) assert.deepEqual(s.sent[0].message.params, { state: false });
   });
 
-  it('close() cancels a pending debounced send', async () => {
+  it('close() cancels a pending debounced send and resolves its promise', async () => {
     const { light, sockets } = makeLight();
-    // The returned promise never settles once close() clears the timer; void it.
-    void light.send({ state: true }).catch(() => {});
+    const promise = light.send({ state: true });
     light.close();
+    await promise; // resolves (cancelled, not failed) rather than hanging forever
     mock.timers.tick(1000);
     await flush();
     assert.equal(sockets.length, 0, 'nothing should be transmitted after close');

@@ -6,7 +6,8 @@ import path from 'node:path';
 import { readJson, writeJson } from './json-file.js';
 import { dim, printErr } from './output.js';
 
-// PLACEHOLDER: point this at the real repository before release.
+// GitHub repo the update check polls. Matches the package `repository` field and
+// the git remote.
 const REPO = 'MegaManSec/wiz-light-controller';
 const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
 
@@ -50,7 +51,9 @@ async function fetchLatestTag(signal) {
     headers: { 'User-Agent': 'wiz-cli', Accept: 'application/vnd.github+json' },
     signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   });
-  if (!res.ok) return null;
+  // Throw (not return null) so a non-OK response counts as a failed check: the
+  // caller then won't record the 24h throttle, and retries on the next run.
+  if (!res.ok) throw new Error(`GitHub update check failed: HTTP ${res.status}`);
   const body = await res.json();
   return typeof body?.tag_name === 'string' ? body.tag_name : null;
 }
@@ -74,6 +77,10 @@ export async function checkForUpdate({ version, dir, emit = true, signal }) {
     if (cache.lastCheck && Date.now() - cache.lastCheck < DAY_MS) return null;
 
     const tag = await fetchLatestTag(signal);
+    // Record the 24h throttle only after a check that actually reached GitHub —
+    // fetchLatestTag throws on network/HTTP failure (caught below), so a
+    // transient outage is retried on the next run instead of silencing the check
+    // for a full day. (Mirrors the macOS app's UpdateChecker.)
     if (cacheFile) await writeJson(cacheFile, { lastCheck: Date.now() }).catch(() => {});
     if (!tag || !isNewer(tag, version)) return null;
 

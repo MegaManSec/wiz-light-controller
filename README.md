@@ -19,6 +19,30 @@ Mirrors the original app's capabilities:
 - **Sync from light** — read a bulb's current state (`getPilot`) back into the UI.
 - **Settings** — accent/highlight colour and auto-sync, persisted locally.
 
+## Screenshots
+
+The native macOS app: a menu-bar dropdown for quick changes, and a full controls window. Each shot is annotated — the numbered callouts are explained beneath it.
+
+**Menu-bar dropdown** — click the bulb for instant control, no window needed:
+
+<img src="assets/screenshot-dropdown.png" alt="Menu-bar dropdown (annotated)" width="380">
+
+**Controls — colour (RGB)** — colour wheel, RGB / HSV / hex entry, and the white-LED "Brighter colours" blend:
+
+<img src="assets/screenshot-rgb.png" alt="RGB colour controls (annotated)" width="520">
+
+**Controls — white & presets** — tunable colour temperature and one-tap presets:
+
+<img src="assets/screenshot-white.png" alt="White temperature and presets (annotated)" width="520">
+
+**Discover** — find bulbs on your LAN and save them:
+
+<img src="assets/screenshot-discover.png" alt="Discovery sheet (annotated)" width="480">
+
+**Settings** — device info, auto-sync, and update checks:
+
+<img src="assets/screenshot-settings.png" alt="Settings tab (annotated)" width="500">
+
 ## Install
 
 ### macOS app

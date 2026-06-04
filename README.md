@@ -19,6 +19,34 @@ Mirrors the original app's capabilities:
 - **Sync from light** — read a bulb's current state (`getPilot`) back into the UI.
 - **Settings** — accent/highlight colour and auto-sync, persisted locally.
 
+## Install
+
+### macOS app
+
+1. Download **`WiZ-Light-Controller-macOS.zip`** from the [latest release](https://github.com/MegaManSec/wiz-light-controller/releases/latest) and unzip it.
+2. Move **`WiZ Light Controller.app`** to `/Applications`.
+3. The build may be unsigned, so macOS blocks it on first launch — **right-click → Open**, or launch it and choose **Open Anyway** under **System Settings → Privacy & Security**. (If macOS calls the app "damaged", clear the download quarantine: `xattr -dr com.apple.quarantine "/Applications/WiZ Light Controller.app"`.)
+4. Approve **Local Network** access when prompted — it's required to reach the bulbs over your LAN. (You can grant it later under **System Settings → Privacy & Security → Local Network**.)
+
+It lives in the menu bar with no Dock icon: click the bulb for the quick dropdown, or the controls button in its header for the full window.
+
+### CLI and engine (npm)
+
+Published to npm; the CLI needs **Node ≥ 24**.
+
+```bash
+pnpm add -g wiz-light-cli      # install the `wiz` command globally
+wiz discover                   # find bulbs on your LAN — then `wiz --help`
+```
+
+Or use the engine as a library in your own project:
+
+```bash
+pnpm add wiz-light-core
+```
+
+(Both also install with npm: `npm i -g wiz-light-cli` / `npm i wiz-light-core`.)
+
 ## Monorepo layout
 
 A pnpm workspace:
@@ -31,9 +59,9 @@ legacy/                          Original GPL-3.0 Python app (wiz.py), preserved
 scripts/                         Repo tooling (build-jscore.mjs, release-notes.mjs).
 ```
 
-## Quick start
+## Build from source
 
-Requires **Node 24** and **pnpm 10** (via Corepack — `corepack enable`).
+For hacking on the project — the prebuilt app and published packages are under [Install](#install) above. Requires **Node 24** and **pnpm 10** (via Corepack — `corepack enable`).
 
 ```bash
 pnpm install              # integrity-checked: pnpm install --frozen-lockfile
@@ -52,7 +80,7 @@ pnpm --filter wiz-light-cli start -- discover     # find bulbs on your LAN
 pnpm --filter wiz-light-cli start -- --help       # all commands
 ```
 
-To install the `wiz` command globally from a checkout, link the package (e.g. `pnpm --filter wiz-light-cli exec npm link`); a published release will also be installable from its tarball.
+(To install the published `wiz` command, see [Install](#install). From a checkout, link it instead: `pnpm --filter wiz-light-cli exec npm link`.)
 
 ### macOS app
 

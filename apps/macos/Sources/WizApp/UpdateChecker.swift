@@ -15,8 +15,8 @@ final class UpdateChecker: ObservableObject {
   // MARK: - Constants
 
   private enum Constants {
-    /// Release-time placeholder — set this to the real published repo slug
-    /// before cutting a release. GitHub treats owner/repo case-insensitively.
+    /// GitHub repo the update check polls. Matches the CLI's `REPO` and the git
+    /// remote. GitHub treats owner/repo case-insensitively.
     static let repoSlug = "MegaManSec/wiz-light-controller"
     static let latestReleaseAPI = "https://api.github.com/repos/\(repoSlug)/releases/latest"
     static let latestReleasePage = "https://github.com/\(repoSlug)/releases/latest"

@@ -45,7 +45,9 @@ export function createSavedLightsStore(dir) {
 
     async remove(mac) {
       const map = await load();
-      if (delete map[mac]) await writeJson(file, map);
+      if (!Object.hasOwn(map, mac)) return map; // absent → nothing to do, no needless write
+      delete map[mac];
+      await writeJson(file, map);
       return map;
     },
   };

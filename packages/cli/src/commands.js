@@ -169,8 +169,11 @@ async function cmdColor({ positionals, values, stores }) {
     if (!rgb) fail(`Not a valid hex colour: ${rest[0]} (expected #rrggbb).`);
   } else if (rest.length === 3) {
     rgb = rest.map((n) => Number(n));
-    if (rgb.some((c) => !Number.isFinite(c) || c < 0 || c > 255)) {
-      fail('RGB channels must be three numbers from 0 to 255.');
+    // Require whole numbers: a fractional channel can't be shown by the bulb and
+    // would render a malformed ANSI swatch (the engine clamps the wire value, but
+    // the printed preview reads the raw input).
+    if (rgb.some((c) => !Number.isInteger(c) || c < 0 || c > 255)) {
+      fail('RGB channels must be three whole numbers from 0 to 255.');
     }
   } else {
     fail('Give either a hex string or exactly three 0-255 values.');

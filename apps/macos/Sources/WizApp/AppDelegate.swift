@@ -206,7 +206,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
     let pop = popover ?? makePopover()
     popover = pop
-    activateApp()
+    // Do NOT force-activate the app on popover open: `activate(ignoringOtherApps:)`
+    // steals frontmost from a full-screen app, which retracts the auto-hidden menu
+    // bar the instant the popover opens. A status-item popover anchors and shows
+    // without activation. (`openController` still activates — there, surfacing the
+    // controls window over full-screen is the intent.)
     pop.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
     // Keep the status button looking "pressed" while the popover is open. The
     // click's own highlight clears on mouse-up, so assert it next tick (guarded so

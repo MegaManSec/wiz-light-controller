@@ -1,6 +1,5 @@
 import AppKit
 import Combine
-import SwiftUI
 import WizKit
 
 /// Application delegate: owns the status item, the controller window, and the
@@ -8,17 +7,21 @@ import WizKit
 /// `.accessory` activation-policy dance, the manual window, and the quit
 /// semantics that keep the app living in the menu bar.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   // MARK: - State
 
   /// The single shared app state. The status item, menu, and views all read it.
   let appState = AppState()
 
   private var statusItem: NSStatusItem!
-  /// The menu-bar dropdown, as a transient SwiftUI popover (live + animated).
-  private var popover: NSPopover?
-  /// Global mouse monitor that dismisses the popover when you click outside it.
-  private var clickMonitor: Any?
+  /// The menu-bar dropdown, as a status-item `NSMenu` whose single item hosts an
+  /// AppKit `DropdownContentView`. A *tracked menu* is the only thing that keeps
+  /// the macOS menu bar revealed over a full-screen Space, and AppKit controls
+  /// (unlike SwiftUI ones) track correctly inside it — matching BetterDisplay.
+  private var dropdownMenu: NSMenu?
+  /// The AppKit content view inside the menu item, kept so its size can be
+  /// refreshed to the live content each time the menu opens.
+  private var dropdownContentView: DropdownContentView?
   /// Cached controller window. Built lazily on first open, kept across closes.
   private var windowController: ControllerWindowController?
 
@@ -128,25 +131,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
   }
 
   /// Close `window` if it's the stray placeholder-scene window: a titled,
-  /// non-sheet window that is neither our controller window nor the popover. The
-  /// popover is borderless, so the `.titled` test alone spares it (the previous
-  /// guard keyed off window *level* and slammed the popover shut); the controller
-  /// window and popover are also spared by identity, belt-and-braces.
+  /// non-sheet window that isn't our controller window. (The dropdown is an
+  /// NSMenu, whose window isn't titled, so it's never matched here.)
   private func closeIfStray(_ window: NSWindow) {
     guard window.styleMask.contains(.titled), !window.isSheet,
-      window !== windowController?.window,
-      window !== popover?.contentViewController?.view.window
+      window !== windowController?.window
     else { return }
     window.close()
   }
 
-  /// Bring the app forward. We deliberately use the (deprecated)
-  /// `activate(ignoringOtherApps:)` rather than the newer no-argument
-  /// `activate()`: a menu-bar agent must be able to surface its popover/window
-  /// *over a full-screen app*, and the cooperative `activate()` refuses to take
-  /// over another app's full-screen Space — the popover then never appears
-  /// (and the controls window can open blank). The deprecation is acceptable
-  /// for this reason; it remains the only call that reliably activates here.
+  /// Bring the app forward with the (deprecated) `activate(ignoringOtherApps:)`
+  /// rather than the newer no-argument `activate()`: a menu-bar agent must be able
+  /// to surface its controls window *over a full-screen app*, and the cooperative
+  /// `activate()` refuses to take over another app's full-screen Space (the window
+  /// can then open blank). The dropdown is an NSMenu and never calls this — a
+  /// status-item menu opens without activating, and menu tracking keeps the bar.
   private func activateApp() {
     NSApp.activate(ignoringOtherApps: true)
   }
@@ -156,10 +155,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
   private func setupStatusBar() {
     NSApp.setActivationPolicy(.accessory)
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    guard let button = statusItem.button else { return }
-    button.target = self
-    button.action = #selector(handleClick(_:))
-    button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+    // A status-item menu (not a popover/panel): clicking the item opens it as a
+    // tracked menu, which keeps the menu bar revealed in full-screen and highlights
+    // the item — and never activates the app, so it can't retract the bar.
+    dropdownMenu = makeDropdownMenu()
+    statusItem.menu = dropdownMenu
     refreshStatusIcon()
   }
 
@@ -196,75 +196,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
       .store(in: &observers)
   }
 
-  // MARK: - Click → menu
+  // MARK: - Dropdown menu
 
-  /// Single-click toggles the dropdown popover (closes it if already open).
-  @objc private func handleClick(_ sender: NSStatusBarButton) {
-    if let popover = popover, popover.isShown {
-      popover.performClose(sender)
-      return
-    }
-    let pop = popover ?? makePopover()
-    popover = pop
-    // Do NOT force-activate the app on popover open: `activate(ignoringOtherApps:)`
-    // steals frontmost from a full-screen app, which retracts the auto-hidden menu
-    // bar the instant the popover opens. A status-item popover anchors and shows
-    // without activation. (`openController` still activates — there, surfacing the
-    // controls window over full-screen is the intent.)
-    pop.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
-    // Keep the status button looking "pressed" while the popover is open. The
-    // click's own highlight clears on mouse-up, so assert it next tick (guarded so
-    // a quick open→close can't leave it stuck on).
-    DispatchQueue.main.async { [weak self] in
-      guard let self = self, self.popover?.isShown == true else { return }
-      self.statusItem.button?.highlight(true)
-      // Make the popover window key so its controls render in their active
-      // (accent/blue) state — and, crucially, so `.help()` tooltips appear:
-      // AppKit only shows tooltips for views in the key window. (A window can't
-      // be key while its app is inactive, which is why `activateApp()` above is
-      // the real fix; this just asserts key on the popover specifically.)
-      self.popover?.contentViewController?.view.window?.makeKey()
-    }
-    // Refresh a connected light's values each time the dropdown opens — but don't
-    // reconnect a disconnected one (so it never overrides a manual disconnect).
+  /// Build the status-item dropdown as an `NSMenu` whose single item hosts the
+  /// AppKit `DropdownContentView`. Menu tracking keeps the macOS menu bar revealed
+  /// over a full-screen Space (a popover/panel can't); the AppKit controls track
+  /// correctly inside the tracked menu. The menu supplies its own material
+  /// background, rounded corners, item highlight, and outside-click dismissal.
+  private func makeDropdownMenu() -> NSMenu {
+    let menu = NSMenu()
+    menu.delegate = self
+    let item = NSMenuItem()
+    let content = DropdownContentView(
+      app: appState,
+      onOpenControls: { [weak self] in self?.openControlsFromMenu() },
+      onQuit: { [weak self] in self?.quitFromStatusBar(nil) })
+    content.updateFrameToFit()
+    item.view = content
+    menu.addItem(item)
+    dropdownContentView = content
+    return menu
+  }
+
+  /// Refresh the dropdown just before it opens: re-read a connected light's values
+  /// (without reconnecting a disconnected one), and resize the hosted view to its
+  /// current content (connected vs. disconnected differ in height).
+  func menuWillOpen(_ menu: NSMenu) {
     appState.refreshIfConnected()
-    // Dismiss when the user clicks outside (the desktop or another app); the
-    // popover delegate tears this monitor down on close.
-    clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) {
-      [weak self] _ in self?.popover?.performClose(nil)
-    }
+    dropdownContentView?.updateFrameToFit()
   }
 
-  /// Build the SwiftUI dropdown popover. Transient so it closes on an outside
-  /// click; reused across opens and reflects live state via the shared AppState.
-  private func makePopover() -> NSPopover {
-    let pop = NSPopover()
-    pop.behavior = .transient
-    pop.animates = true
-    pop.delegate = self
-    let content = DropdownView(
-      onOpenControls: { [weak self] in self?.openControlsFromPopover() },
-      onQuit: { [weak self] in self?.quitFromStatusBar(nil) }
-    ).environmentObject(appState)
-    let host = NSHostingController(rootView: content)
-    host.sizingOptions = [.preferredContentSize]  // smoother popover resize on mode switches
-    pop.contentViewController = host
-    return pop
-  }
-
-  /// Close the popover, then open the full controls window.
-  private func openControlsFromPopover() {
-    popover?.performClose(nil)
-    openController(tab: .controls)
-  }
-
-  /// Tear down the outside-click monitor whenever the popover closes (any cause).
-  func popoverDidClose(_ notification: Notification) {
-    statusItem.button?.highlight(false)
-    if let monitor = clickMonitor {
-      NSEvent.removeMonitor(monitor)
-      clickMonitor = nil
-    }
+  /// Close the dropdown, then open the full controls window. Deferred a tick so
+  /// the menu's tracking loop has fully ended before we activate + show a window.
+  private func openControlsFromMenu() {
+    dropdownMenu?.cancelTracking()
+    DispatchQueue.main.async { [weak self] in self?.openController(tab: .controls) }
   }
 
   // MARK: - Quit
@@ -287,11 +253,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
   /// `.regular`).
   private func openController(tab: ControllerWindowController.Tab) {
     NSApp.setActivationPolicy(.regular)
-    activateApp()
     if windowController == nil {
       windowController = ControllerWindowController(appState: appState)
     }
     windowController?.show(tab: tab)
+    // Activate AFTER the window is ordered front so macOS switches to the Space the
+    // (normal desktop) window lives on — i.e. from a full-screen Space back to the
+    // desktop. Activating first, before any window exists, gives it nothing to
+    // switch to, so the user stays in full-screen (the reported bug).
+    activateApp()
   }
 
   /// Drop back to `.accessory` (no Dock icon) once the last normal window closes.

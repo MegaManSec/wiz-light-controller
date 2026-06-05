@@ -385,6 +385,20 @@ final class AppState: ObservableObject {
     refreshSignal()
   }
 
+  /// Warm Glow is a local overlay on white mode (the temperature follows the
+  /// brightness curve); the bulb — and another app driving it — can't report it.
+  /// So after folding in a fresh read, drop out of Warm Glow if that read is RGB,
+  /// or its white temperature no longer tracks the curve (someone changed the
+  /// mode/temperature elsewhere). Otherwise `colorMode` stays stuck on `.warmGlow`
+  /// (it overrides `state.mode`) and the dropdown + controls show the wrong
+  /// mode/colour.
+  private func reconcileWarmGlow(with next: LightState) {
+    guard warmGlow else { return }
+    if next.mode == .rgb || abs(next.temp - kelvinForBrightness(next.brightness)) > 50 {
+      warmGlow = false
+    }
+  }
+
   private func syncAttempt(host: String, attempt: Int) {
     guard selectedIp == host, let client = client else { return }
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -400,6 +414,7 @@ final class AppState: ObservableObject {
           var next = parsed
           if next.mode == .white { next.rgb = self.state.rgb }
           self.state = next
+          self.reconcileWarmGlow(with: next)
           if next.on, next.brightness > 0 { self.lastBrightness = next.brightness }
           self.deviceInfo.rssi = (result["rssi"] as? NSNumber)?.intValue ?? self.deviceInfo.rssi
           self.loadDeviceConfig(host: host, client: client)
@@ -540,7 +555,10 @@ final class AppState: ObservableObject {
             // While the light is off, the user may be staging a colour to apply
             // when they turn it back up — don't let the poll overwrite it. Fold
             // only when the bulb is on, or an on/off flip happened elsewhere.
-            if self.state.on || next.on, next != self.state { self.state = next }
+            if self.state.on || next.on, next != self.state {
+              self.state = next
+              self.reconcileWarmGlow(with: next)
+            }
             if next.on, next.brightness > 0 { self.lastBrightness = next.brightness }
           }
           self.bump()

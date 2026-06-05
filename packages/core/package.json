@@ -1,6 +1,6 @@
 {
   "name": "wiz-light-core",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Local WiZ light engine: protocol, discovery, colour math, and persisted state. Zero runtime dependencies.",
   "license": "GPL-3.0-or-later",
   "homepage": "https://github.com/MegaManSec/wiz-light-controller#readme",

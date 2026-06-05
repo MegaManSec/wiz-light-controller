@@ -374,7 +374,11 @@ final class DropdownContentView: NSView {
     {
       mode.selectedSegment = idx
     }
-    powerSwitch?.setOn(app.state.on, animated: false)
+    // Animate power changes that happen while the dropdown is open (e.g. dragging
+    // brightness to 0 turns the light off, or up from 0 turns it on) so the knob
+    // slides instead of jumping. Rebuilds still snap: makeControlsRow sets the fresh
+    // toggle non-animated and this then no-ops (setOn ignores an unchanged value).
+    powerSwitch?.setOn(app.state.on, animated: true)
     if let bright = brightnessSlider, !bright.isTracking {
       bright.value = app.state.on ? Double(app.state.brightness) : 0
     }

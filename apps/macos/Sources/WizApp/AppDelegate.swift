@@ -24,7 +24,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
   private var observers: Set<AnyCancellable> = []
   private var windowCloseObserver: NSObjectProtocol?
-  private var strayWindowObserver: NSObjectProtocol?
 
   /// Set true by `quitFromStatusBar` just before `terminate`, so
   /// `applicationShouldTerminate` knows this is a real exit (not Cmd+Q in the
@@ -38,7 +37,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     UserDefaults.standard.set(2000, forKey: "NSInitialToolTipDelay")
     setupStatusBar()
     setupActivationPolicyTracking()
-    setupStrayWindowGuard()
     observeState()
 
     // Best-effort, silent, throttled to once per 24h. Drives the "Update
@@ -95,44 +93,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     if let token = windowCloseObserver {
       NotificationCenter.default.removeObserver(token)
     }
-    if let token = strayWindowObserver {
-      NotificationCenter.default.removeObserver(token)
-    }
-  }
-
-  // MARK: - Stray-window guard
-
-  /// We're a menu-bar agent: the only standard windows we ever present are the
-  /// controller window and its sheets. But `App.body` requires at least one
-  /// `Scene`, so `WizLightControllerApp` declares a placeholder
-  /// `Settings { EmptyView() }`. On macOS 26 that scene's window can surface on
-  /// its own (restored, or shown when the app first activates), dumping the user
-  /// into a blank "WiZ Light Controller Settings" window on launch. Watch for any
-  /// such stray window and close it on sight.
-  private func setupStrayWindowGuard() {
-    strayWindowObserver = NotificationCenter.default.addObserver(
-      forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
-    ) { [weak self] note in
-      guard let window = note.object as? NSWindow else { return }
-      DispatchQueue.main.async { self?.closeIfStray(window) }
-    }
-    // A restored window may already be on screen (and never re-become key), so
-    // also sweep what's open shortly after launch.
-    for delay in [0.0, 0.4] {
-      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-        guard let self else { return }
-        for window in NSApp.windows { self.closeIfStray(window) }
-      }
-    }
-  }
-
-  /// Close `window` if it's the stray placeholder-scene window — a visible,
-  /// normal-level, non-sheet window that isn't our controller window. The
-  /// controller window and the Discover sheet are explicitly spared.
-  private func closeIfStray(_ window: NSWindow) {
-    guard window.isVisible, window.level == .normal, !window.isSheet else { return }
-    if window == windowController?.window { return }
-    window.close()
   }
 
   /// Bring the app forward. We deliberately use the (deprecated)

@@ -1,12 +1,32 @@
 import SwiftUI
 import WizKit
 
+/// Carries the Discover button's bounds up to the controls container so the mode
+/// picker can line its right edge up with Discover's right edge (rather than the
+/// content edge, which would run under the "Connected" status).
+private struct DiscoverBoundsKey: PreferenceKey {
+  static let defaultValue: Anchor<CGRect>? = nil
+  static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+    value = value ?? nextValue()
+  }
+}
+
+/// The trailing inset for the mode-picker row (content width − Discover's right
+/// edge), computed from `DiscoverBoundsKey` in the controls' coordinate space.
+private struct ModePickerInsetKey: PreferenceKey {
+  static let defaultValue: CGFloat = 0
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 /// The main controller UI hosted in the manual window. A tab view: live controls
 /// (connection, power, colour, brightness, presets) and settings. Reads/writes
 /// `AppState`; every edit routes through `applyLive()` (the engine/WizClient
 /// already debounces).
 struct ControllerView: View {
   @EnvironmentObject var app: AppState
+  /// Trailing inset that lines the mode picker's right edge up with the Discover
+  /// button (measured via `DiscoverBoundsKey`).
+  @State private var modePickerInset: CGFloat = 0
 
   var body: some View {
     // A custom segmented header instead of a `TabView`: on macOS 26 the system
@@ -51,7 +71,7 @@ struct ControllerView: View {
       VStack(alignment: .leading, spacing: 18) {
         ConnectionBar()
         if app.connected {
-          PowerModeBar()
+          PowerModeBar(trailingInset: modePickerInset)
             .padding(.bottom, 10)
           // Colour controls stay visible even when off, so you can stage a colour
           // or mode and have it apply when you bring the brightness back up.
@@ -84,6 +104,14 @@ struct ControllerView: View {
           .padding(.top, 8)
         }
       }
+      .overlayPreferenceValue(DiscoverBoundsKey.self) { anchor in
+        GeometryReader { proxy in
+          Color.clear.preference(
+            key: ModePickerInsetKey.self,
+            value: anchor.map { max(0, proxy.size.width - proxy[$0].maxX) } ?? 0)
+        }
+      }
+      .onPreferenceChange(ModePickerInsetKey.self) { modePickerInset = $0 }
       .padding(20)
     }
   }
@@ -143,6 +171,7 @@ struct ConnectionBar: View {
         Label("Discover", systemImage: "wifi")
       }
       .help("Scan the local network for WiZ lights.")
+      .anchorPreference(key: DiscoverBoundsKey.self, value: .bounds) { $0 }
 
       Spacer()
       statusDot
@@ -191,6 +220,9 @@ struct ConnectionBar: View {
 
 struct PowerModeBar: View {
   @EnvironmentObject var app: AppState
+  /// Trailing inset so the mode picker's right edge lines up with the Discover
+  /// button above (measured + supplied by `ControllerView`).
+  var trailingInset: CGFloat = 0
 
   var body: some View {
     HStack(spacing: 16) {
@@ -200,6 +232,10 @@ struct PowerModeBar: View {
       .toggleStyle(.switch)
       .disabled(!app.hasLight)
 
+      // On/off switch alone on the left; push the mode picker right, then inset the
+      // row so the picker's right edge lines up with the Discover button above.
+      Spacer()
+
       Picker("Mode", selection: modeBinding) {
         ForEach(AppState.ColorMode.allCases) { mode in
           Text(mode.label).tag(mode)
@@ -208,8 +244,8 @@ struct PowerModeBar: View {
       .pickerStyle(.segmented)
       .frame(maxWidth: 280)
       .disabled(!app.hasLight)
-      Spacer()
     }
+    .padding(.trailing, trailingInset)
   }
 
   private var powerBinding: Binding<Bool> {

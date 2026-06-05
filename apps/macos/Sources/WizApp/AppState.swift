@@ -65,6 +65,11 @@ final class AppState: ObservableObject {
   /// Which tab the controller window shows. Set by the menu before opening.
   @Published var selectedTab: ControllerWindowController.Tab = .controls
 
+  /// Set by the menu-bar popover's "Discover" call-to-action to ask the controls
+  /// window to pop the discovery sheet as soon as it's open. The window's
+  /// `ConnectionBar` consumes (and clears) it.
+  @Published var requestDiscovery = false
+
   /// Bumped whenever the status item should re-render its icon/tooltip/menu.
   /// AppDelegate observes this.
   @Published private(set) var revision: Int = 0

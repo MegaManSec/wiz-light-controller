@@ -19,15 +19,54 @@ struct DropdownView: View {
         updateRow(latest)
       }
       header
+      Divider()
       if app.connected {
-        Divider()
         controls
+      } else {
+        disconnected
       }
     }
     .padding(14)
     .frame(width: 290)
     .animation(.easeInOut(duration: 0.22), value: app.colorMode)
     .animation(.easeInOut(duration: 0.22), value: app.connected)
+  }
+
+  // MARK: - Disconnected state
+
+  /// What to show when no light is live: a Discover call-to-action on a fresh
+  /// install (nothing saved yet), or a Connect button for a selected-but-offline
+  /// light. Without this the popover is just a bare header — a dead end on first
+  /// launch, with no way to reach discovery.
+  @ViewBuilder private var disconnected: some View {
+    if app.hasLight {
+      Button {
+        app.reconnect()
+      } label: {
+        Label("Connect to \(app.displayName)", systemImage: "link")
+          .frame(maxWidth: .infinity)
+      }
+      .controlSize(.large)
+      .help("Connect to the selected light.")
+    } else {
+      VStack(alignment: .leading, spacing: 8) {
+        Text("No lights set up yet")
+          .font(.subheadline.weight(.medium))
+        Text("Scan your network for WiZ lights, then save one to control it here.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+        Button {
+          app.requestDiscovery = true
+          onOpenControls()
+        } label: {
+          Label("Discover lights…", systemImage: "wifi")
+            .frame(maxWidth: .infinity)
+        }
+        .controlSize(.large)
+        .help("Open the controls window and scan for lights.")
+      }
+    }
   }
 
   // MARK: - Header

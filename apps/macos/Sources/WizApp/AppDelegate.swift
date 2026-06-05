@@ -95,6 +95,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
   }
 
+  /// Bring the app forward. `activate(ignoringOtherApps:)` is deprecated and, on
+  /// macOS 14+, unreliable for a background (`.accessory`) agent — it often
+  /// leaves the app inactive, so the popover window can't become key and
+  /// `.help()` tooltips never appear. The no-argument `activate()` is the
+  /// supported replacement; fall back on older systems.
+  private func activateApp() {
+    if #available(macOS 14.0, *) {
+      NSApp.activate()
+    } else {
+      NSApp.activate(ignoringOtherApps: true)
+    }
+  }
+
   // MARK: - Status bar
 
   private func setupStatusBar() {
@@ -150,7 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
     let pop = popover ?? makePopover()
     popover = pop
-    NSApp.activate(ignoringOtherApps: true)
+    activateApp()
     pop.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
     // Keep the status button looking "pressed" while the popover is open. The
     // click's own highlight clears on mouse-up, so assert it next tick (guarded so
@@ -158,8 +171,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     DispatchQueue.main.async { [weak self] in
       guard let self = self, self.popover?.isShown == true else { return }
       self.statusItem.button?.highlight(true)
-      // Focus the popover so its controls render in their active (accent/blue)
-      // state immediately, without needing a click inside first.
+      // Make the popover window key so its controls render in their active
+      // (accent/blue) state — and, crucially, so `.help()` tooltips appear:
+      // AppKit only shows tooltips for views in the key window. (A window can't
+      // be key while its app is inactive, which is why `activateApp()` above is
+      // the real fix; this just asserts key on the popover specifically.)
       self.popover?.contentViewController?.view.window?.makeKey()
     }
     // Refresh a connected light's values each time the dropdown opens — but don't
@@ -224,7 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
   /// `.regular`).
   private func openController(tab: ControllerWindowController.Tab) {
     NSApp.setActivationPolicy(.regular)
-    NSApp.activate(ignoringOtherApps: true)
+    activateApp()
     if windowController == nil {
       windowController = ControllerWindowController(appState: appState)
     }

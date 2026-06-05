@@ -9,13 +9,28 @@ struct ControllerView: View {
   @EnvironmentObject var app: AppState
 
   var body: some View {
-    TabView(selection: tabBinding) {
-      controls
-        .tabItem { Label("Controls", systemImage: "slider.horizontal.3") }
-        .tag(ControllerWindowController.Tab.controls)
-      SettingsView()
-        .tabItem { Label("Settings", systemImage: "gearshape") }
-        .tag(ControllerWindowController.Tab.settings)
+    // A custom segmented header instead of a `TabView`: on macOS 26 the system
+    // tab bar renders as a floating glass strip that overlaps the scroll content
+    // beneath it. A plain segmented picker + switched content keeps the layout
+    // fully under our control and matches the mode pickers used elsewhere.
+    VStack(spacing: 0) {
+      Picker("View", selection: tabBinding) {
+        Text("Controls").tag(ControllerWindowController.Tab.controls)
+        Text("Settings").tag(ControllerWindowController.Tab.settings)
+      }
+      .pickerStyle(.segmented)
+      .labelsHidden()
+      .frame(maxWidth: 320)
+      .padding(.horizontal, 20)
+      .padding(.top, 12)
+      .padding(.bottom, 10)
+
+      Divider()
+
+      switch app.selectedTab {
+      case .controls: controls
+      case .settings: SettingsView()
+      }
     }
     .frame(minWidth: 600, minHeight: 500)
     .onAppear {
@@ -135,6 +150,18 @@ struct ConnectionBar: View {
     .sheet(isPresented: $showDiscovery) {
       DiscoveryView().environmentObject(app)
     }
+    // The menu-bar popover's "Discover" CTA opens this window and sets a flag;
+    // honour it whether the window was just built (onAppear) or already open
+    // (onChange).
+    .onAppear { consumeDiscoveryRequest() }
+    .onChange(of: app.requestDiscovery) { _ in consumeDiscoveryRequest() }
+  }
+
+  /// Pop the discovery sheet if the popover asked for it, then clear the request.
+  private func consumeDiscoveryRequest() {
+    guard app.requestDiscovery else { return }
+    app.requestDiscovery = false
+    showDiscovery = true
   }
 
   /// The dropdown selects (without connecting) a saved light by MAC; the Connect

@@ -7,11 +7,16 @@ struct SettingsView: View {
 
   var body: some View {
     Form {
-      Section("Device") {
-        InfoRow("Signal", signalText)
-        InfoRow("MAC", app.deviceInfo.mac.isEmpty ? "—" : app.core.formatMac(app.deviceInfo.mac))
-        InfoRow("Firmware", app.deviceInfo.firmware.isEmpty ? "—" : app.deviceInfo.firmware)
-        ModelRow(model: app.deviceInfo.moduleName, summary: app.deviceSummary)
+      // Device facts are live readings — only meaningful while connected. With
+      // nothing connected there's nothing to show but a column of em dashes, so
+      // hide the whole section.
+      if app.connected {
+        Section("Device") {
+          InfoRow("Signal", signalText)
+          InfoRow("MAC", app.deviceInfo.mac.isEmpty ? "—" : app.core.formatMac(app.deviceInfo.mac))
+          InfoRow("Firmware", app.deviceInfo.firmware.isEmpty ? "—" : app.deviceInfo.firmware)
+          ModelRow(model: app.deviceInfo.moduleName, summary: app.deviceSummary)
+        }
       }
       Section("Behaviour") {
         Toggle("Auto-sync from the light on launch", isOn: autoSyncBinding)

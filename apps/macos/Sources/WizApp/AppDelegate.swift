@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
   private var observers: Set<AnyCancellable> = []
   private var windowCloseObserver: NSObjectProtocol?
+  private var strayWindowObserver: NSObjectProtocol?
 
   /// Set true by `quitFromStatusBar` just before `terminate`, so
   /// `applicationShouldTerminate` knows this is a real exit (not Cmd+Q in the
@@ -37,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     UserDefaults.standard.set(2000, forKey: "NSInitialToolTipDelay")
     setupStatusBar()
     setupActivationPolicyTracking()
+    setupStrayWindowGuard()
     observeState()
 
     // Best-effort, silent, throttled to once per 24h. Drives the "Update
@@ -93,6 +95,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     if let token = windowCloseObserver {
       NotificationCenter.default.removeObserver(token)
     }
+    if let token = strayWindowObserver {
+      NotificationCenter.default.removeObserver(token)
+    }
+  }
+
+  // MARK: - Stray-window guard
+
+  /// `App.body` must declare at least one `Scene`, so `WizLightControllerApp`
+  /// ships a placeholder `Settings { EmptyView() }` meant to be unreachable. On
+  /// macOS 26 that scene's window surfaces on its own at launch (and again the
+  /// first time the app activates), dropping the user into a blank "WiZ Light
+  /// Controller Settings" window — and because that window lacks
+  /// `.moveToActiveSpace`, activating the app over a full-screen Space yanks the
+  /// user to it. (`NSQuitAlwaysKeepsWindows = false` only suppresses the
+  /// *restored* copy, never this fresh-launch one.) Close it on sight.
+  private func setupStrayWindowGuard() {
+    strayWindowObserver = NotificationCenter.default.addObserver(
+      forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
+    ) { [weak self] note in
+      guard let window = note.object as? NSWindow else { return }
+      DispatchQueue.main.async { self?.closeIfStray(window) }
+    }
+    // It may already be on screen at launch (and never re-become key), so also
+    // sweep what's open over the first second.
+    for delay in [0.0, 0.3, 0.7] {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        guard let self else { return }
+        for window in NSApp.windows { self.closeIfStray(window) }
+      }
+    }
+  }
+
+  /// Close `window` if it's the stray placeholder-scene window: a titled,
+  /// non-sheet window that is neither our controller window nor the popover. The
+  /// popover is borderless, so the `.titled` test alone spares it (the previous
+  /// guard keyed off window *level* and slammed the popover shut); the controller
+  /// window and popover are also spared by identity, belt-and-braces.
+  private func closeIfStray(_ window: NSWindow) {
+    guard window.styleMask.contains(.titled), !window.isSheet,
+      window !== windowController?.window,
+      window !== popover?.contentViewController?.view.window
+    else { return }
+    window.close()
   }
 
   /// Bring the app forward. We deliberately use the (deprecated)

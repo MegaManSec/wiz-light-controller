@@ -25,11 +25,12 @@ final class ControllerWindowController: NSWindowController {
     window.isReleasedWhenClosed = false
     window.center()
     window.contentMinSize = NSSize(width: 620, height: 520)
-    // Open on whichever Space the user is currently viewing, instead of yanking
-    // them to the desktop where the window was first created.
-    window.collectionBehavior.insert(.moveToActiveSpace)
-    // Also let it float over a full-screen app instead of opening on a hidden desktop.
-    window.collectionBehavior.insert(.fullScreenAuxiliary)
+    // Keep this a normal desktop-Space window. Opening it from the menu-bar
+    // popover deliberately sends the user *to* the window (the app activates and
+    // macOS switches to its Space) rather than dragging it onto whatever
+    // full-screen Space they're in — the requested "take me to the settings
+    // window" behaviour. (Earlier builds inserted .moveToActiveSpace +
+    // .fullScreenAuxiliary to make it follow the user; that's what we're undoing.)
     super.init(window: window)
     window.contentView = NSHostingView(rootView: ControllerView().environmentObject(appState))
   }

@@ -137,33 +137,69 @@ jobs:
             fi
           done
 
-      - name: Create GitHub Release
+      - name: Create draft GitHub Release
         if: steps.gate.outputs.version != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.gate.outputs.version }}
-        # gh creates the vX.Y.Z tag at this commit (the verified merge commit on
-        # main) and the Release, and uploads the npm tarballs as assets.
+        # Create the Release as a DRAFT and attach the npm tarballs. Under GitHub's
+        # immutable releases a *published* release's assets are frozen, so the
+        # native macOS app could no longer be appended after the fact. A draft is
+        # not immutable: the build-macos job attaches the app to it, and the
+        # `publish` job below flips it to published — which creates the vX.Y.Z tag
+        # at this commit and freezes the now-complete asset set. Idempotent: on a
+        # re-run a pre-existing draft is reused and its tarballs refreshed rather
+        # than failing on a duplicate.
         run: |
-          gh release create "v$VERSION" \
-            --target "$GITHUB_SHA" \
-            --title "v$VERSION" \
-            --notes-file RELEASE_NOTES.md \
-            artifacts/*.tgz
+          if gh release view "v$VERSION" --json tagName >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists — refreshing its tarball assets."
+            gh release upload "v$VERSION" artifacts/*.tgz --clobber
+          else
+            gh release create "v$VERSION" \
+              --draft \
+              --target "$GITHUB_SHA" \
+              --title "v$VERSION" \
+              --notes-file RELEASE_NOTES.md \
+              artifacts/*.tgz
+          fi
 
   # When (and only when) a release was cut, build the native macOS app and attach
-  # it to that Release — in the same run. We call macos-build.yml directly instead
-  # of relying on the new tag to trigger it: a tag created by the default
+  # it to the DRAFT Release — in the same run. We call macos-build.yml directly
+  # instead of relying on the new tag to trigger it: a tag created by the default
   # GITHUB_TOKEN does not trigger other workflows (GitHub's anti-recursion rule),
-  # and the alternative — a long-lived PAT — is worse for security.
+  # and the alternative — a long-lived PAT — is worse for security. We build from
+  # the release commit (`ref: github.sha`), not the tag, because the tag does not
+  # exist yet — the draft has no tag until the `publish` job publishes it.
   build-macos:
     needs: release
     if: needs.release.outputs.version != ''
     permissions:
-      contents: write # attach the app to the Release
+      contents: write # attach the app to the draft Release
       id-token: write # build-provenance attestation
       attestations: write
     uses: ./.github/workflows/macos-build.yml
     with:
       release-tag: v${{ needs.release.outputs.version }}
+      ref: ${{ github.sha }}
     secrets: inherit # forwards the (optional) Apple signing secrets; none → ad-hoc
+
+  # Publish the draft once the macOS app is attached, so the immutable release is
+  # frozen with the COMPLETE asset set (tarballs + app). Publishing creates the
+  # vX.Y.Z tag at the draft's target commit. `needs: build-macos` means it runs
+  # only if the app build+attach succeeded — a failure leaves the draft UNpublished
+  # (private to write-access collaborators) and the run re-runnable, never a public
+  # half-release.
+  publish:
+    needs: [release, build-macos]
+    if: needs.release.outputs.version != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # publish (un-draft) the Release, which creates the tag
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - name: Publish the Release
+        run: gh release edit "v$VERSION" --draft=false --latest

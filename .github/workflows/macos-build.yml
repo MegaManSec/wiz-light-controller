@@ -6,11 +6,13 @@ name: macOS Build
 # (`pnpm build:jscore`) before `swift build`/`swift test` and `make app`.
 #
 # Triggers:
-#   - workflow_call         → release.yml calls this after cutting a release,
-#     passing `release-tag`, so the app builds + attaches to that Release in the
-#     same run (no GITHUB_TOKEN tag-trigger dance, no long-lived PAT).
-#   - workflow_dispatch     → manual (re)build; run it against a tag to build and
-#     attach that release's app, e.g. `gh workflow run macos-build.yml --ref vX.Y.Z`.
+#   - workflow_call         → release.yml calls this after creating the DRAFT
+#     release, passing `release-tag` + `ref` (the release commit). The app builds
+#     from that commit and attaches to the draft in the same run; release.yml then
+#     publishes it (no GITHUB_TOKEN tag-trigger dance, no long-lived PAT).
+#   - workflow_dispatch     → manual (re)build against a ref; produces the app as a
+#     build artifact only. It can NOT attach to an existing release — under
+#     GitHub's immutable releases a published release's assets are frozen.
 #
 # Signing & notarization are GATED on repository secrets. With them present the
 # Makefile signs with a Developer ID Application certificate (hardened runtime)
@@ -26,9 +28,17 @@ on:
   workflow_call:
     inputs:
       release-tag:
-        description: The vX.Y.Z tag to build the app from and attach it to.
+        description: The vX.Y.Z tag whose (draft) Release the built app is attached to.
         type: string
         required: true
+      ref:
+        description: >-
+          The commit SHA (or ref) to build the app from. release.yml passes the
+          release commit because the vX.Y.Z tag does not exist yet — the Release is
+          a draft (untagged) until the app is attached and it is published.
+        type: string
+        required: false
+        default: ''
   workflow_dispatch:
 
 # No ambient token: the one job opts back in to exactly what it needs.
@@ -57,9 +67,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          # Build the released tag when called by release.yml (release-tag), else
-          # whatever ref a manual dispatch targeted.
-          ref: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
+          # Build the release commit passed by release.yml (`ref`, since the tag
+          # does not exist until the draft is published), else whatever ref a manual
+          # dispatch targeted.
+          ref: ${{ inputs.ref != '' && inputs.ref || github.ref_name }}
           persist-credentials: false
 
       - name: Set up Node.js
@@ -155,13 +166,16 @@ jobs:
           name: macos-app
           path: ${{ steps.zip.outputs.path }}
 
-      - name: Attach to Release
-        # Upload (clobbering on a re-run) the zip to the Release for this tag: the
-        # `release-tag` passed by release.yml, or the tag a manual dispatch
-        # targeted. Skipped when dispatched against a non-tag ref (e.g. main).
-        if: ${{ inputs.release-tag != '' || startsWith(github.ref, 'refs/tags/v') }}
+      - name: Attach to draft Release
+        # Upload the app zip (clobbering on a re-run) to the DRAFT Release that
+        # release.yml created for this tag. A draft is not immutable, so the asset
+        # can still be added; release.yml's `publish` job then freezes it. Only the
+        # workflow_call path attaches — a manual workflow_dispatch can NOT append to
+        # an already-published (immutable) release, so it just leaves the app as the
+        # build artifact uploaded above.
+        if: ${{ inputs.release-tag != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
+          TAG: ${{ inputs.release-tag }}
           ZIP_PATH: ${{ steps.zip.outputs.path }}
         run: gh release upload "$TAG" "$ZIP_PATH" --clobber

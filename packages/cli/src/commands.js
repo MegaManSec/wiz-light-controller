@@ -16,6 +16,7 @@ import {
   DEFAULT_STATE,
   hexToRgb,
   rgbToHex,
+  perceivedRgb,
   isValidIp,
   clampBrightness,
   formatMac,
@@ -99,12 +100,14 @@ const light = (ip) => new WizLight(ip);
 
 // ---------- formatting ----------
 
-function formatState(ip, state) {
+function formatState(ip, state, result = {}) {
   const power = state.on ? green('on') : dim('off');
   const lines = [`${bold(ip)}  ${power}`, `  mode        ${state.mode}`];
   if (state.mode === 'rgb') {
-    const hex = rgbToHex(state.rgb);
-    lines.push(`  colour      ${swatch(state.rgb)} ${hex}`);
+    // Fold the bulb's white channels (c/w) in so the swatch matches what the eye
+    // sees (and the official app), not just the raw colour LEDs.
+    const rgb = perceivedRgb(state.rgb, result.c, result.w);
+    lines.push(`  colour      ${swatch(rgb)} ${rgbToHex(rgb)}`);
   } else {
     lines.push(`  temperature ${state.temp}K`);
   }
@@ -143,9 +146,13 @@ async function cmdDiscover({ values }) {
 
 async function cmdStatus({ positionals, stores }) {
   const ip = await resolveIp(positionals[0], stores);
-  const state = await liveState(ip);
+  // Keep the raw result (not just the parsed state) so the swatch can fold in the
+  // bulb's white channels (c/w) for a true-to-eye colour.
+  const result = await queryWithRetry(ip);
+  const state = parsePilot(result);
+  if (!state) fail(`Could not reach a WiZ bulb at ${ip}.`);
   await stores.lastState.saveIp(ip);
-  print(formatState(ip, state));
+  print(formatState(ip, state, result));
 }
 
 const powerCommand =

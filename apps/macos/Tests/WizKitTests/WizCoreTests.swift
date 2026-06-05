@@ -14,6 +14,10 @@ final class WizCoreTests: XCTestCase {
     XCTAssertEqual(core.hexToRgb("#7b2cbf"), [123, 44, 191])
     XCTAssertNil(core.hexToRgb("not-a-colour"))
     XCTAssertEqual(core.kelvinToRgb(6500).count, 3)
+    // Folding the bulb's white channels (normalise to full value, wash toward
+    // white) matches the official app to the digit; no white channels => unchanged.
+    XCTAssertEqual(core.perceivedRgb([255, 0, 65], c: 0, w: 0), [255, 0, 65])
+    XCTAssertEqual(core.perceivedRgb([255, 0, 65], c: 0, w: 111), [255, 101, 140]) // FF658C
   }
 
   func testWheelGeometry() {

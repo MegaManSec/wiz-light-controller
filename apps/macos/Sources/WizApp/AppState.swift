@@ -399,6 +399,21 @@ final class AppState: ObservableObject {
     }
   }
 
+  /// Fold the bulb's white channels (`c`/`w`) into the displayed RGB. The engine
+  /// infers control state from r/g/b alone (model.js `parsePilot`), so a colour the
+  /// bulb renders with its white LEDs — a pastel, or anything set from the phone
+  /// app — reads back over-saturated; this recombines them so the swatch and hex
+  /// match what the eye sees. RGB mode only, and a no-op when no white is lit.
+  private func perceivedState(_ parsed: LightState, from result: [String: Any]) -> LightState {
+    guard parsed.mode == .rgb else { return parsed }
+    let c = (result["c"] as? NSNumber)?.intValue ?? 0
+    let w = (result["w"] as? NSNumber)?.intValue ?? 0
+    guard c != 0 || w != 0 else { return parsed }
+    var next = parsed
+    next.rgb = core.perceivedRgb(parsed.rgb, c: c, w: w)
+    return next
+  }
+
   private func syncAttempt(host: String, attempt: Int) {
     guard selectedIp == host, let client = client else { return }
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -411,7 +426,7 @@ final class AppState: ObservableObject {
           self.healthFailures = 0
           // Preserve the user's last RGB if the bulb reports white mode (so
           // flipping back to RGB restores their colour rather than white).
-          var next = parsed
+          var next = self.perceivedState(parsed, from: result)
           if next.mode == .white { next.rgb = self.state.rgb }
           self.state = next
           self.reconcileWarmGlow(with: next)
@@ -550,7 +565,7 @@ final class AppState: ObservableObject {
           if Date().timeIntervalSince(self.lastLocalEdit) > 3,
             let parsed = self.core.parsePilot(result)
           {
-            var next = parsed
+            var next = self.perceivedState(parsed, from: result)
             if next.mode == .white { next.rgb = self.state.rgb }
             // While the light is off, the user may be staging a colour to apply
             // when they turn it back up — don't let the poll overwrite it. Fold

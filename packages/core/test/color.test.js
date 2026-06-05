@@ -8,6 +8,7 @@ import {
   rgbToHex,
   hexToRgb,
   kelvinToRgb,
+  perceivedRgb,
   wheelToHS,
   hsToWheel,
 } from '../src/color.js';
@@ -156,6 +157,27 @@ describe('color: kelvinToRgb', () => {
       const rgb = kelvinToRgb(k);
       for (const c of rgb) assert.ok(Number.isInteger(c) && c >= 0 && c <= 255);
     }
+  });
+});
+
+describe('color: perceivedRgb', () => {
+  it('returns the rgb unchanged (clamped) when no white channels are lit', () => {
+    assert.deepEqual(perceivedRgb([255, 0, 65], 0, 0), [255, 0, 65]);
+    assert.deepEqual(perceivedRgb([255, 0, 65]), [255, 0, 65]); // c/w default to 0
+    assert.deepEqual(perceivedRgb([300, -10, 127.6], 0, 0), [255, 0, 128]); // still clamps/rounds
+  });
+
+  it('normalises to full value and washes toward white — matches the WiZ app', () => {
+    // Ground-truth hexes read off the official iOS app for these exact channels:
+    assert.deepEqual(perceivedRgb([255, 0, 65], 0, 111), [255, 101, 140]); // FF658C
+    assert.deepEqual(perceivedRgb([40, 0, 160], 0, 90), [125, 82, 255]); //   7D52FF
+    assert.deepEqual(perceivedRgb([0, 150, 50], 0, 120), [109, 255, 158]); // 6DFF9E
+    assert.deepEqual(perceivedRgb([200, 30, 0], 80, 0), [255, 100, 73]); //   FF6449
+  });
+
+  it('treats cool and warm white the same, and adds them (c + w)', () => {
+    assert.deepEqual(perceivedRgb([0, 140, 90], 90, 0), [82, 255, 193]); //   52FFC1
+    assert.deepEqual(perceivedRgb([160, 0, 90], 60, 60), [255, 109, 191]); // FF6DBF
   });
 });
 

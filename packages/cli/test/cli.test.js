@@ -53,6 +53,10 @@ test('commandHelp renders a command’s usage, and falls back for unknown names'
   assert.match(commandHelp('color'), /wiz color/);
   // status advertises its `sync` alias
   assert.match(commandHelp('status'), /sync/);
+  // scene(s) document their usage + the speed flag
+  assert.match(commandHelp('scene'), /wiz scene .*<name\|id>/);
+  assert.match(commandHelp('scene'), /--speed/);
+  assert.match(commandHelp('scenes'), /wiz scenes/);
   // unknown → top-level help
   assert.equal(commandHelp('nope'), topLevelHelp());
 });

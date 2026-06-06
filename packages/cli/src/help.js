@@ -68,6 +68,28 @@ export const COMMANDS = {
     usage: 'wiz preset [<ip>] <name> [--brightness <0-100>]',
     details: ['Looks the name up across the RGB and white preset groups.'],
   },
+  scenes: {
+    summary: 'List the bulb’s dynamic scenes',
+    usage: 'wiz scenes [<ip>] [--json]',
+    details: [
+      'Lists the built-in scenes by id. Given an <ip> (or a remembered bulb), shows',
+      'only the scenes that bulb supports; otherwise lists them all.',
+    ],
+  },
+  scene: {
+    summary: 'Run a dynamic scene',
+    usage: 'wiz scene [<ip>] <name|id> [--speed <10-200>] [--brightness <0-100>]',
+    details: [
+      'Accepts a scene name (case-insensitive) or its id — see `wiz scenes`.',
+      '',
+      '  --speed <10-200>       Animation speed (default: keep the bulb’s current)',
+      '  --brightness <0-100>   Brightness percent',
+      '',
+      'Examples:',
+      '  wiz scene 10.0.0.5 party --speed 120',
+      '  wiz scene 10.0.0.5 4',
+    ],
+  },
   lights: {
     summary: 'List saved lights',
     usage: 'wiz lights [--json]',

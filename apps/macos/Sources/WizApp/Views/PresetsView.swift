@@ -34,6 +34,7 @@ struct PresetsView: View {
       case .rgb: grid(for: .rgb, title: "RGB")
       case .white: grid(for: .white, title: "White")
       case .warmGlow: warmGlowGrid
+      case .scene: EmptyView()  // scenes use ScenesView, not the preset grids
       }
     }
     .popover(isPresented: $showSave) { savePopover }

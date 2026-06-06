@@ -370,7 +370,7 @@ final class DropdownContentView: NSView {
   private func syncValues() {
     nameLabel?.stringValue = headerText
     if let mode = modeControl,
-      let idx = AppState.ColorMode.allCases.firstIndex(of: app.colorMode)
+      let idx = AppState.ColorMode.popoverModes.firstIndex(of: app.colorMode)
     {
       mode.selectedSegment = idx
     }
@@ -451,9 +451,9 @@ final class DropdownContentView: NSView {
     powerSwitch = sw
 
     let mode = NSSegmentedControl(
-      labels: AppState.ColorMode.allCases.map(\.label),
+      labels: AppState.ColorMode.popoverModes.map(\.label),
       trackingMode: .selectOne, target: self, action: #selector(modeChanged(_:)))
-    if let idx = AppState.ColorMode.allCases.firstIndex(of: app.colorMode) {
+    if let idx = AppState.ColorMode.popoverModes.firstIndex(of: app.colorMode) {
       mode.selectedSegment = idx
     }
     mode.segmentDistribution = .fillEqually
@@ -569,7 +569,7 @@ final class DropdownContentView: NSView {
   // MARK: - Actions
 
   @objc private func modeChanged(_ sender: NSSegmentedControl) {
-    let modes = AppState.ColorMode.allCases
+    let modes = AppState.ColorMode.popoverModes
     guard sender.selectedSegment >= 0, sender.selectedSegment < modes.count else { return }
     app.setColorMode(modes[sender.selectedSegment])
   }

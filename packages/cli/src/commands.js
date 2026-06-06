@@ -13,12 +13,19 @@ import {
   parsePilot,
   buildSetPilotParams,
   applyPreset,
+  SCENES,
+  findScene,
+  scenesForDevice,
+  sceneName,
   DEFAULT_STATE,
   hexToRgb,
   rgbToHex,
   perceivedRgb,
   isValidIp,
   clampBrightness,
+  clampSpeed,
+  SPEED_MIN,
+  SPEED_MAX,
   formatMac,
   discover,
 } from 'wiz-light-core';
@@ -57,6 +64,17 @@ function parseBrightness(values) {
     fail('--brightness must be a number from 0 to 100.');
   }
   return clampBrightness(n);
+}
+
+/** Parse and validate the optional `--speed` flag (dynamic scenes), or undefined. */
+function parseSpeed(values) {
+  if (values.speed === undefined) return undefined;
+  const range = `from ${SPEED_MIN} to ${SPEED_MAX}`;
+  if (typeof values.speed !== 'string') fail(`--speed needs a value ${range}.`);
+  const n = Number(values.speed);
+  if (!Number.isFinite(n) || n < SPEED_MIN || n > SPEED_MAX)
+    fail(`--speed must be a number ${range}.`);
+  return clampSpeed(n);
 }
 
 /** Parse an optional positive-integer flag (e.g. `--attempts`, `--timeout`). */
@@ -102,14 +120,21 @@ const light = (ip) => new WizLight(ip);
 
 function formatState(ip, state, result = {}) {
   const power = state.on ? green('on') : dim('off');
-  const lines = [`${bold(ip)}  ${power}`, `  mode        ${state.mode}`];
-  if (state.mode === 'rgb') {
-    // Fold the bulb's white channels (c/w) in so the swatch matches what the eye
-    // sees (and the official app), not just the raw colour LEDs.
-    const rgb = perceivedRgb(state.rgb, result.c, result.w);
-    lines.push(`  colour      ${swatch(rgb)} ${rgbToHex(rgb)}`);
+  const lines = [`${bold(ip)}  ${power}`];
+  if (state.scene) {
+    const name = sceneName(state.scene.id) ?? `#${state.scene.id}`;
+    const at = state.scene.speed != null ? ` · speed ${state.scene.speed}` : '';
+    lines.push(`  scene       ${cyan(name)}${at}`);
   } else {
-    lines.push(`  temperature ${state.temp}K`);
+    lines.push(`  mode        ${state.mode}`);
+    if (state.mode === 'rgb') {
+      // Fold the bulb's white channels (c/w) in so the swatch matches what the eye
+      // sees (and the official app), not just the raw colour LEDs.
+      const rgb = perceivedRgb(state.rgb, result.c, result.w);
+      lines.push(`  colour      ${swatch(rgb)} ${rgbToHex(rgb)}`);
+    } else {
+      lines.push(`  temperature ${state.temp}K`);
+    }
   }
   lines.push(`  brightness  ${state.brightness}%`);
   return lines.join('\n');
@@ -275,6 +300,47 @@ async function liveStateOrDefault(ip) {
   return parsePilot(await queryWithRetry(ip)) ?? { ...DEFAULT_STATE };
 }
 
+async function cmdScenes({ positionals, values, stores }) {
+  // List all scenes by default; if a bulb is given (or remembered) and reachable,
+  // narrow to the ones it can actually show.
+  let list = Object.entries(SCENES).map(([id, name]) => ({ id: Number(id), name }));
+  const ip = positionals[0] ?? (await stores.lastState.loadIp());
+  if (ip && isValidIp(ip)) {
+    const model = await getModelConfig(ip);
+    if (model) list = scenesForDevice(model);
+  }
+  if (values.json) {
+    print(JSON.stringify(list, null, 2));
+    return;
+  }
+  print(bold('Scenes'));
+  for (const { id, name } of list) {
+    print(`  ${dim(String(id).padStart(2))}  ${cyan(name)}`);
+  }
+}
+
+async function cmdScene({ positionals, values, stores }) {
+  const ip = await resolveIp(positionals[0], stores);
+  // Join the rest so a multi-word name ("Pastel Colors") works even unquoted.
+  const wanted = positionals.slice(1).join(' ').trim();
+  if (!wanted) fail('Give a scene name or id (see `wiz scenes`).');
+  const scene = findScene(wanted);
+  if (!scene) fail(`Unknown scene: ${wanted}. Run \`wiz scenes\` to list them.`);
+
+  const speed = parseSpeed(values);
+  const brightness = parseBrightness(values) ?? DEFAULT_STATE.brightness;
+  const next = {
+    ...DEFAULT_STATE,
+    on: true,
+    brightness,
+    scene: speed === undefined ? { id: scene.id } : { id: scene.id, speed },
+  };
+  await light(ip).sendNow(buildSetPilotParams(next, await deviceBounds(ip)));
+  await stores.lastState.saveIp(ip);
+  const at = speed === undefined ? '' : ` @ speed ${speed}`;
+  print(`${bold(ip)} → scene ${cyan(scene.name)}${at}`);
+}
+
 async function cmdLights({ values, stores }) {
   const saved = await stores.savedLights.load();
   const entries = Object.entries(saved);
@@ -316,6 +382,8 @@ export const handlers = {
   brightness: cmdBrightness,
   presets: cmdPresets,
   preset: cmdPreset,
+  scenes: cmdScenes,
+  scene: cmdScene,
   lights: cmdLights,
   save: cmdSave,
 };

@@ -6,6 +6,28 @@ public enum LightMode: String, Codable, Equatable {
   case white
 }
 
+/// A reference to a running dynamic scene — its id and an optional animation speed.
+/// Mirrors the engine `LightState.scene`.
+public struct SceneRef: Equatable {
+  public var id: Int
+  public var speed: Int?
+  public init(id: Int, speed: Int? = nil) {
+    self.id = id
+    self.speed = speed
+  }
+}
+
+/// A catalogue entry from the engine's scene table — an id and its display name.
+/// (`LightScene`, not `Scene`, to avoid colliding with SwiftUI's `Scene`.)
+public struct LightScene: Identifiable, Equatable {
+  public let id: Int
+  public let name: String
+  public init(id: Int, name: String) {
+    self.id = id
+    self.name = name
+  }
+}
+
 /// The light's logical state — the Swift mirror of wiz-light-core's `LightState`.
 /// Marshalled to/from the JS engine as a plain dictionary.
 public struct LightState: Equatable {
@@ -14,18 +36,31 @@ public struct LightState: Equatable {
   public var rgb: [Int]  // three channels, 0–255
   public var temp: Int  // Kelvin
   public var brightness: Int  // 0–100
+  public var scene: SceneRef?  // set only while a dynamic scene runs
 
-  public init(on: Bool, mode: LightMode, rgb: [Int], temp: Int, brightness: Int) {
+  public init(
+    on: Bool, mode: LightMode, rgb: [Int], temp: Int, brightness: Int, scene: SceneRef? = nil
+  ) {
     self.on = on
     self.mode = mode
     self.rgb = rgb
     self.temp = temp
     self.brightness = brightness
+    self.scene = scene
   }
 
-  /// Plain dictionary form passed to the JS engine.
+  /// Plain dictionary form passed to the JS engine. `scene` is included only when
+  /// set, so `buildSetPilotParams` emits a scene only when one is active.
   public var jsObject: [String: Any] {
-    ["on": on, "mode": mode.rawValue, "rgb": rgb, "temp": temp, "brightness": brightness]
+    var o: [String: Any] = [
+      "on": on, "mode": mode.rawValue, "rgb": rgb, "temp": temp, "brightness": brightness,
+    ]
+    if let scene = scene {
+      var s: [String: Any] = ["id": scene.id]
+      if let speed = scene.speed { s["speed"] = speed }
+      o["scene"] = s
+    }
+    return o
   }
 
   /// Reconstruct from the engine's returned object (NSNumber/NSString-backed).
@@ -38,6 +73,11 @@ public struct LightState: Equatable {
     self.rgb = JSNum.intArray(js["rgb"]) ?? [255, 255, 255]
     self.temp = JSNum.int(js["temp"]) ?? 4000
     self.brightness = JSNum.int(js["brightness"]) ?? 100
+    if let s = js["scene"] as? [String: Any], let id = JSNum.int(s["id"]) {
+      self.scene = SceneRef(id: id, speed: JSNum.int(s["speed"]))
+    } else {
+      self.scene = nil
+    }
   }
 }
 

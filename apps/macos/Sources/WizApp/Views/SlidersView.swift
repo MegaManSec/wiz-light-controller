@@ -155,12 +155,20 @@ private struct LabeledSlider: View {
 /// instead of being silently ignored.
 private struct HexField: View {
   @EnvironmentObject var app: AppState
-  @State private var text = ""
+  // Non-nil only while the user is actively editing. When nil the field shows the
+  // live colour, so it tracks changes from *any* control — wheel, sliders, presets,
+  // a background poll. A plain @State mirror went stale because its sync was gated
+  // on `!focused`, and on macOS a text field keeps first-responder focus even while
+  // you drag a slider elsewhere — so the gate stayed shut and the hex never updated.
+  @State private var draft: String?
   @State private var invalid = false
   @State private var shake: CGFloat = 0
   @FocusState private var focused: Bool
 
   private static let template = "FFFFFF"
+
+  /// What the field displays: the in-progress edit, else the live colour.
+  private var shown: String { draft ?? sanitize(app.hex) }
 
   var body: some View {
     HStack(spacing: 10) {
@@ -174,11 +182,8 @@ private struct HexField: View {
         .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(.black.opacity(0.2)))
       Spacer()
     }
-    .onAppear { text = sanitize(app.hex) }
-    // Don't clobber what the user is typing if a background poll folds in a new
-    // colour; re-sync (and normalise to upper-case) when the field loses focus.
-    .onChange(of: app.hex) { if !focused { text = sanitize($0) } }
-    .onChange(of: focused) { if !$0 { text = sanitize(app.hex) } }
+    // Drop an abandoned edit when focus leaves, snapping back to the live colour.
+    .onChange(of: focused) { if !$0 { draft = nil } }
   }
 
   /// `#` + a fixed-width field where the typed digits sit over a greyed six-digit
@@ -188,13 +193,12 @@ private struct HexField: View {
       Text("#").foregroundStyle(.secondary)
       ZStack(alignment: .leading) {
         Text(ghost).foregroundStyle(.tertiary)
-        TextField("", text: $text)
+        // While editing, `draft` holds the typed value (case preserved, filtered to
+        // hex); otherwise the binding reads the live colour so external changes show
+        // at once. Filtering in `set` (vs re-assigning afterwards) avoids caret jumps.
+        TextField("", text: Binding(get: { shown }, set: { draft = acceptHexInput($0) }))
           .textFieldStyle(.plain)
           .focused($focused)
-          // Filter to hex (max six) but keep the typed case — re-assigning `text`
-          // to a different string jumps the caret to the end, so upper-casing is
-          // deferred to submit / the focus-loss re-sync above.
-          .onChange(of: text) { text = acceptHexInput($0) }
           .onSubmit(submit)
       }
       .frame(width: 62, alignment: .leading)
@@ -213,7 +217,7 @@ private struct HexField: View {
   /// Spaces over the already-typed positions, then the remaining template digits,
   /// so grey only shows for characters still to be entered.
   private var ghost: String {
-    let typed = min(text.count, Self.template.count)
+    let typed = min(shown.count, Self.template.count)
     return String(repeating: " ", count: typed) + String(Self.template.dropFirst(typed))
   }
 
@@ -228,11 +232,12 @@ private struct HexField: View {
   }
 
   private func submit() {
+    let value = shown
     // Reject incomplete input and pure black (which the bulb can't show).
-    if text.count == 6, text != "000000" {
+    if value.count == 6, value != "000000" {
       invalid = false
-      text = text.uppercased()  // normalise the display (caret is at the end → no jump)
-      app.setHex(text)
+      app.setHex(value)
+      draft = nil  // committed → fall back to the live (upper-cased) colour
     } else {
       flagInvalid()
     }

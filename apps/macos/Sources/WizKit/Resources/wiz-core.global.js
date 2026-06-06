@@ -45,6 +45,7 @@ var WizCore = (() => {
     kelvinToRgb: () => kelvinToRgb,
     normalizeHex: () => normalizeHex,
     parsePilot: () => parsePilot,
+    perceivedRgb: () => perceivedRgb,
     rgbToHex: () => rgbToHex,
     rgbToHsv: () => rgbToHsv,
     rgbToWhiteMixed: () => rgbToWhiteMixed,
@@ -129,6 +130,14 @@ var WizCore = (() => {
       b = 255;
     }
     return [clampByte(r), clampByte(g), clampByte(b)];
+  }
+  var WHITE_WASH_FULL = 280;
+  function perceivedRgb([r, g, b], c = 0, w = 0) {
+    if (!c && !w) return [clampByte(r), clampByte(g), clampByte(b)];
+    const max = Math.max(r, g, b, 1);
+    const t = Math.min(1, (Math.max(0, c) + Math.max(0, w)) / WHITE_WASH_FULL);
+    const wash = (chan) => (chan / max * (1 - t) + t) * 255;
+    return [clampByte(wash(r)), clampByte(wash(g)), clampByte(wash(b))];
   }
   function wheelToHS(x, y, size) {
     const c = size / 2;

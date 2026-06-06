@@ -65,6 +65,14 @@ public final class WizCore {
   }
   public func kelvinToRgb(_ kelvin: Int) -> [Int] { JSNum.intArray(call("kelvinToRgb", [kelvin]).toArray()) ?? [255, 255, 255] }
 
+  /// Fold the bulb's white channels (`c`/`w`) into an RGB triple to approximate
+  /// the colour the eye sees — `parsePilot` reports r/g/b only, so a colour the
+  /// bulb renders with its white LEDs reads back over-saturated. Display only;
+  /// see color.js `perceivedRgb`.
+  public func perceivedRgb(_ rgb: [Int], c: Int, w: Int) -> [Int] {
+    JSNum.intArray(call("perceivedRgb", [rgb, c, w]).toArray()) ?? rgb
+  }
+
   /// Wheel point → hue/saturation, or `nil` outside the wheel.
   public func wheelToHS(x: Double, y: Double, size: Double) -> (h: Double, s: Double)? {
     let v = call("wheelToHS", [x, y, size])

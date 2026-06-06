@@ -109,6 +109,38 @@ export function kelvinToRgb(kelvin) {
 }
 
 /**
+ * Combined white-channel level (`c + w`) at which a colour washes fully to white.
+ * Fit to the official WiZ app (≈280); see {@link perceivedRgb}.
+ */
+const WHITE_WASH_FULL = 280;
+
+/**
+ * Approximate the colour the eye sees from a bulb's full channel state. WiZ RGB
+ * bulbs drive two white LEDs (`c` cool, `w` warm) on top of R/G/B. The official
+ * app shows colour at full value (max channel = 255 — its hex "must contain FF")
+ * with brightness on a separate control, and its white LEDs **wash the colour
+ * toward white** (desaturate it) rather than tinting it. So this normalises the
+ * rgb to full value, then blends toward white by `t = (c + w) / WHITE_WASH_FULL`;
+ * cool and warm behave identically and simply add. With no white lit it returns
+ * the rgb untouched (so colours we set ourselves are unaffected). Fit to — and
+ * matching to ~1 level/channel — the WiZ iOS app across measured colours (FF658C,
+ * 7D52FF, 52FFC1, FF6449, FF6DBF). Display-only — never send the result back to
+ * the bulb, or the colour will drift.
+ *
+ * @param {[number, number, number]} rgb  chromatic channels (0–255)
+ * @param {number} [c]  cool-white channel value (0–255)
+ * @param {number} [w]  warm-white channel value (0–255)
+ * @returns {[number, number, number]}
+ */
+export function perceivedRgb([r, g, b], c = 0, w = 0) {
+  if (!c && !w) return [clampByte(r), clampByte(g), clampByte(b)];
+  const max = Math.max(r, g, b, 1); // normalise the colour to full value (max → 255)
+  const t = Math.min(1, (Math.max(0, c) + Math.max(0, w)) / WHITE_WASH_FULL);
+  const wash = (chan) => ((chan / max) * (1 - t) + t) * 255;
+  return [clampByte(wash(r)), clampByte(wash(g)), clampByte(wash(b))];
+}
+
+/**
  * Map a click at `(x, y)` on a square colour wheel of side `size` to hue and
  * saturation, or `null` when the point lies outside the wheel.
  */

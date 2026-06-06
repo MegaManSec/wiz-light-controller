@@ -443,9 +443,9 @@ describe('model: deviceCapabilities', () => {
 });
 
 describe('model: dynamic scenes', () => {
-  it('parsePilot surfaces a running scene (id + clamped speed)', () => {
-    const s = parsePilot({ state: true, sceneId: 4, speed: 120, dimming: 80 });
-    assert.deepEqual(s.scene, { id: 4, speed: 120 });
+  it('parsePilot surfaces a running scene (id + speed)', () => {
+    const s = parsePilot({ state: true, sceneId: 4, speed: 60, dimming: 80 });
+    assert.deepEqual(s.scene, { id: 4, speed: 60 });
     assert.equal(s.brightness, 80);
     assert.equal(s.on, true);
   });
@@ -461,12 +461,12 @@ describe('model: dynamic scenes', () => {
 
   it('buildSetPilotParams emits sceneId + speed + dimming for a scene', () => {
     assert.deepEqual(
-      buildSetPilotParams({ on: true, brightness: 80, scene: { id: 4, speed: 120 } }),
+      buildSetPilotParams({ on: true, brightness: 80, scene: { id: 4, speed: 60 } }),
       {
         state: true,
         dimming: 80,
         sceneId: 4,
-        speed: 120,
+        speed: 60,
       },
     );
   });
@@ -481,7 +481,7 @@ describe('model: dynamic scenes', () => {
 
   it('buildSetPilotParams clamps an out-of-range scene speed', () => {
     const p = buildSetPilotParams({ on: true, brightness: 100, scene: { id: 4, speed: 999 } });
-    assert.equal(p.speed, 200);
+    assert.equal(p.speed, 100);
   });
 
   it('a scene still yields { state: false } when off', () => {

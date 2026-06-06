@@ -10,6 +10,9 @@ import {
   clampInt,
   clampBrightness,
   clampTemp,
+  clampSpeed,
+  SPEED_MIN,
+  SPEED_MAX,
   toDimming,
   clampRgb,
 } from '../src/validate.js';
@@ -139,6 +142,16 @@ describe('validate: clampTemp', () => {
     assert.equal(clampTemp(TEMP_MIN), TEMP_MIN);
     assert.equal(clampTemp(4000), 4000);
     assert.equal(clampTemp(99999), TEMP_MAX);
+  });
+});
+
+describe('validate: clampSpeed', () => {
+  it('constrains a dynamic-scene speed to [1, 100]', () => {
+    assert.equal(clampSpeed(0), SPEED_MIN);
+    assert.equal(clampSpeed(1), 1);
+    assert.equal(clampSpeed(50), 50);
+    assert.equal(clampSpeed(100), 100);
+    assert.equal(clampSpeed(999), SPEED_MAX);
   });
 });
 

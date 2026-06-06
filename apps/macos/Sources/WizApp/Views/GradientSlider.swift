@@ -10,6 +10,9 @@ struct GradientSlider: View {
   let range: ClosedRange<Double>
   /// Colour stops painted left→right across the track.
   let colors: [Color]
+  /// When set, draw a solid progress track — `filled` left of the thumb, `unfilled`
+  /// after it — instead of the gradient. Matches the popover's scene-speed slider.
+  var progressFill: (filled: Color, unfilled: Color)? = nil
   /// Called continuously while dragging (after `value` updates) so callers can
   /// push the change to the light.
   var onEditing: () -> Void = {}
@@ -27,12 +30,7 @@ struct GradientSlider: View {
       let x = thumb / 2 + fraction * usable
 
       ZStack(alignment: .leading) {
-        RoundedRectangle(cornerRadius: height / 2)
-          .fill(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing))
-          .frame(height: height)
-          .overlay(
-            RoundedRectangle(cornerRadius: height / 2)
-              .strokeBorder(.black.opacity(0.2), lineWidth: 1))
+        trackView(x: x)
 
         Circle()
           .fill(.white)
@@ -54,5 +52,26 @@ struct GradientSlider: View {
           .onEnded { _ in onCommit() })
     }
     .frame(height: height)
+  }
+
+  /// The track behind the thumb: a solid progress fill (filled left of the thumb
+  /// centre `x`, unfilled after) when `progressFill` is set, else the gradient.
+  @ViewBuilder
+  private func trackView(x: CGFloat) -> some View {
+    let border = RoundedRectangle(cornerRadius: height / 2).strokeBorder(.black.opacity(0.2), lineWidth: 1)
+    if let pf = progressFill {
+      ZStack(alignment: .leading) {
+        Rectangle().fill(pf.unfilled)
+        Rectangle().fill(pf.filled).frame(width: x)
+      }
+      .frame(height: height)
+      .clipShape(RoundedRectangle(cornerRadius: height / 2))
+      .overlay(border)
+    } else {
+      RoundedRectangle(cornerRadius: height / 2)
+        .fill(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing))
+        .frame(height: height)
+        .overlay(border)
+    }
   }
 }

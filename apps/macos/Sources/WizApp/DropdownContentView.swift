@@ -20,6 +20,11 @@ final class GradientSliderControl: NSControl {
   var gradientColors: [NSColor] = [.black, .white] {
     didSet { needsDisplay = true }
   }
+  /// When set, draw a solid progress track — `filled` left of the thumb, `unfilled`
+  /// after it — instead of the gradient. Used by the scene-speed slider.
+  var progressFill: (filled: NSColor, unfilled: NSColor)? {
+    didSet { needsDisplay = true }
+  }
   /// Called continuously while dragging (after `value` updates).
   var onEditing: (Double) -> Void = { _ in }
   /// Called once when the drag ends.
@@ -44,8 +49,17 @@ final class GradientSliderControl: NSControl {
 
     NSGraphicsContext.current?.saveGraphicsState()
     path.addClip()
-    let colors = gradientColors.count >= 2 ? gradientColors : [.black, .white]
-    NSGradient(colors: colors)?.draw(in: track, angle: 0)
+    if let pf = progressFill {
+      let frac = CGFloat((value - minValue) / max(0.0001, maxValue - minValue))
+      let fillW = thumbSize / 2 + min(max(frac, 0), 1) * max(1, b.width - thumbSize)  // to thumb centre
+      pf.unfilled.setFill()
+      NSBezierPath(rect: track).fill()
+      pf.filled.setFill()
+      NSBezierPath(rect: NSRect(x: track.minX, y: track.minY, width: fillW, height: track.height)).fill()
+    } else {
+      let colors = gradientColors.count >= 2 ? gradientColors : [.black, .white]
+      NSGradient(colors: colors)?.draw(in: track, angle: 0)
+    }
     NSGraphicsContext.current?.restoreGraphicsState()
 
     NSColor.black.withAlphaComponent(0.2).setStroke()
@@ -243,6 +257,31 @@ final class CircleIconButton: NSControl {
   }
 }
 
+/// A transparent clickable container for the tracked menu: routes clicks anywhere
+/// in its frame to `onClick` (ignoring the visual subviews) and consumes the
+/// mouse-up so a tap doesn't dismiss the menu. Used for the scene header + chips.
+final class TapControl: NSControl {
+  private let onClick: () -> Void
+  init(onClick: @escaping () -> Void) {
+    self.onClick = onClick
+    super.init(frame: .zero)
+    wantsLayer = true
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError() }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    bounds.contains(convert(point, from: superview)) ? self : nil
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    guard isEnabled, let window = window else { return }
+    onClick()
+    _ = window.nextEvent(matching: [.leftMouseUp])
+  }
+}
+
 /// The menu-bar dropdown's content, in pure AppKit so it can live inside a tracked
 /// `NSMenu` (the only thing that keeps the macOS menu bar revealed over a
 /// full-screen Space). Mirrors the SwiftUI `DropdownView`: header, power switch,
@@ -266,14 +305,28 @@ final class DropdownContentView: NSView {
   private var modeControl: NSSegmentedControl?
   private var brightnessSlider: GradientSliderControl?
   private var colorSlider: GradientSliderControl?
+  private var speedSlider: GradientSliderControl?
+  private var sceneHeaderLabel: NSTextField?
+  private var sceneListExpanded = false
+  // Row containers, so a hover hint covers the whole row (icon + slider), not just the slider.
+  private var brightnessRow: NSView?
+  private var colorRow: NSView?
+  private var speedRow: NSView?
 
-  private static let contentWidth: CGFloat = 262  // 290 panel − 14pt insets each side
+  /// Popover modes — adds Scenes only when the bulb supports them (gated like the
+  /// controls window). Scenes live only in the controls window otherwise.
+  private var popoverModes: [AppState.ColorMode] {
+    app.supportsScenes ? AppState.ColorMode.popoverModes + [.scene] : AppState.ColorMode.popoverModes
+  }
+
+  private static let panelWidth: CGFloat = 320  // wide enough for 4 full mode-picker segments
+  private static let contentWidth: CGFloat = panelWidth - 28  // 14pt insets each side
 
   init(app: AppState, onOpenControls: @escaping () -> Void, onQuit: @escaping () -> Void) {
     self.app = app
     self.onOpenControls = onOpenControls
     self.onQuit = onQuit
-    super.init(frame: NSRect(x: 0, y: 0, width: 290, height: 200))
+    super.init(frame: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 200))
 
     stack.orientation = .vertical
     stack.alignment = .leading
@@ -307,7 +360,7 @@ final class DropdownContentView: NSView {
   /// only tear down and rebuild when the shape actually changes.
   private func currentStructureKey() -> String {
     let update = UpdateChecker.shared.updateAvailable && UpdateChecker.shared.latestVersion != nil
-    return "\(app.connected)|\(app.hasLight)|\(app.colorMode.rawValue)|\(update)"
+    return "\(app.connected)|\(app.hasLight)|\(app.colorMode.rawValue)|\(app.supportsScenes)|\(sceneListExpanded)|\(app.state.scene?.id ?? 0)|\(update)"
   }
 
   private func scheduleSync() {
@@ -332,6 +385,11 @@ final class DropdownContentView: NSView {
     modeControl = nil
     brightnessSlider = nil
     colorSlider = nil
+    speedSlider = nil
+    sceneHeaderLabel = nil
+    brightnessRow = nil
+    colorRow = nil
+    speedRow = nil
 
     if UpdateChecker.shared.updateAvailable, let latest = UpdateChecker.shared.latestVersion {
       stack.addArrangedSubview(makeUpdateRow(latest))
@@ -341,9 +399,21 @@ final class DropdownContentView: NSView {
 
     if app.connected {
       stack.addArrangedSubview(makeControlsRow())
-      stack.addArrangedSubview(makeBrightnessRow())
-      if !app.warmGlow {
-        stack.addArrangedSubview(makeColorRow())
+      if app.colorMode == .scene {
+        stack.addArrangedSubview(makeBrightnessRow())
+        stack.addArrangedSubview(makeSpeedRow())
+        // Scene selector sits at the bottom; expanding it grows the menu downward.
+        stack.addArrangedSubview(makeSceneHeaderRow())
+        if sceneListExpanded {
+          stack.addArrangedSubview(makeSceneGrid())
+        }
+      } else {
+        stack.addArrangedSubview(makeBrightnessRow())
+        // Warm Glow's temperature is automatic, so it shows brightness only (the
+        // colour/temperature row fades out, and the menu shrinks to fit).
+        if !app.warmGlow {
+          stack.addArrangedSubview(makeColorRow())
+        }
       }
     } else {
       stack.addArrangedSubview(makeDisconnected())
@@ -352,15 +422,15 @@ final class DropdownContentView: NSView {
     updateFrameToFit()
   }
 
-  /// Resize the view to fit its current content at the fixed 290-pt width, so the
+  /// Resize the view to fit its current content at the fixed panel width, so the
   /// menu measures the right size — including shrinking when Warm Glow drops the
   /// colour row. Width is pinned (not taken from `fittingSize`) because AppKit
   /// controls report their width lazily, which made the first open render too
   /// narrow (the rows overflowed to the edge).
   func updateFrameToFit() {
-    setFrameSize(NSSize(width: 290, height: max(1, fittingSize.height)))
+    setFrameSize(NSSize(width: Self.panelWidth, height: max(1, fittingSize.height)))
     layoutSubtreeIfNeeded()
-    setFrameSize(NSSize(width: 290, height: max(1, fittingSize.height)))
+    setFrameSize(NSSize(width: Self.panelWidth, height: max(1, fittingSize.height)))
     // Nudge the open menu to re-measure this item so it grows/shrinks with the
     // content (e.g. Warm Glow dropping the colour row).
     invalidateIntrinsicContentSize()
@@ -369,9 +439,7 @@ final class DropdownContentView: NSView {
   /// Update live values in place without rebuilding (skipping a slider mid-drag).
   private func syncValues() {
     nameLabel?.stringValue = headerText
-    if let mode = modeControl,
-      let idx = AppState.ColorMode.popoverModes.firstIndex(of: app.colorMode)
-    {
+    if let mode = modeControl, let idx = popoverModes.firstIndex(of: app.colorMode) {
       mode.selectedSegment = idx
     }
     // Animate power changes that happen while the dropdown is open (e.g. dragging
@@ -387,6 +455,27 @@ final class DropdownContentView: NSView {
       color.value = app.state.mode == .rgb ? app.hsv.h : Double(app.state.temp)
       color.gradientColors = app.state.mode == .rgb ? hueStops() : tempStops()
     }
+    if let speed = speedSlider, !speed.isTracking {
+      speed.value = Double(app.state.scene?.speed ?? 50)
+    }
+    sceneHeaderLabel?.stringValue =
+      app.availableScenes.first { $0.id == app.state.scene?.id }?.name ?? "Choose a scene"
+
+    // Hover hints: what each control does + its current value, on the whole row
+    // (icon + slider) and on the switch / mode picker / device name.
+    let brightnessTip = app.state.on ? "Brightness — \(app.state.brightness)%" : "Brightness — off"
+    brightnessRow?.toolTip = brightnessTip
+    brightnessSlider?.toolTip = brightnessTip
+    let colorTip =
+      app.state.mode == .rgb
+      ? "Colour (hue) — \(Int(app.hsv.h))°" : "Colour temperature — \(app.state.temp) K"
+    colorRow?.toolTip = colorTip
+    colorSlider?.toolTip = colorTip
+    let speedTip = "Scene speed — \(app.state.scene?.speed ?? 50)%"
+    speedRow?.toolTip = speedTip
+    speedSlider?.toolTip = speedTip
+    powerSwitch?.toolTip = app.state.on ? "On — tap to turn off" : "Off — tap to turn on"
+    nameLabel?.toolTip = deviceTooltip
   }
 
   // MARK: - Rows
@@ -451,12 +540,15 @@ final class DropdownContentView: NSView {
     powerSwitch = sw
 
     let mode = NSSegmentedControl(
-      labels: AppState.ColorMode.popoverModes.map(\.label),
+      labels: popoverModes.map(\.label),
       trackingMode: .selectOne, target: self, action: #selector(modeChanged(_:)))
-    if let idx = AppState.ColorMode.popoverModes.firstIndex(of: app.colorMode) {
+    if let idx = popoverModes.firstIndex(of: app.colorMode) {
       mode.selectedSegment = idx
     }
-    mode.segmentDistribution = .fillEqually
+    for (i, m) in popoverModes.enumerated() { mode.setToolTip(modeTooltip(m), forSegment: i) }
+    // Proportional (not equal) so long labels — "Warm Glow", "Scenes" — keep their
+    // full width instead of truncating to fit an equal share.
+    mode.segmentDistribution = .fillProportionally
     mode.setContentHuggingPriority(.defaultLow, for: .horizontal)
     modeControl = mode
 
@@ -471,10 +563,18 @@ final class DropdownContentView: NSView {
     slider.maxValue = 100
     slider.value = app.state.on ? Double(app.state.brightness) : 0
     slider.gradientColors = [Self.nsColor([43, 43, 43]), liveNSColor]
-    slider.onEditing = { [weak self] v in self?.app.setBrightnessLevel(Int(v.rounded())) }
-    slider.onCommit = { [weak self] in self?.app.commitBrightnessMemory() }
+    slider.onEditing = { [weak self] v in
+      self?.app.isDraggingBrightness = true
+      self?.app.setBrightnessLevel(Int(v.rounded()))
+    }
+    slider.onCommit = { [weak self] in
+      self?.app.isDraggingBrightness = false
+      self?.app.commitBrightnessMemory()
+    }
     brightnessSlider = slider
-    return sliderRow("sun.max", slider)
+    let row = sliderRow("sun.max", slider)
+    brightnessRow = row
+    return row
   }
 
   private func makeColorRow() -> NSView {
@@ -489,7 +589,9 @@ final class DropdownContentView: NSView {
         guard let self else { return }
         self.app.setHSV(h: v, s: self.app.hsv.s < 1 ? 100 : self.app.hsv.s, v: max(1, self.app.hsv.v))
       }
-      return sliderRow("paintpalette", slider)
+      let row = sliderRow("paintpalette", slider)
+      colorRow = row
+      return row
     } else {
       slider.minValue = Double(app.tempRange.lowerBound)
       slider.maxValue = Double(app.tempRange.upperBound)
@@ -501,7 +603,9 @@ final class DropdownContentView: NSView {
         self.app.state.mode = .white
         self.app.applyLive()
       }
-      return sliderRow("thermometer.medium", slider)
+      let row = sliderRow("thermometer.medium", slider)
+      colorRow = row
+      return row
     }
   }
 
@@ -523,6 +627,107 @@ final class DropdownContentView: NSView {
     row.addArrangedSubview(icon)
     row.addArrangedSubview(slider)
     return fullWidth(row)
+  }
+
+  /// The current scene + a chevron; tapping toggles the inline scene grid.
+  private func makeSceneHeaderRow() -> NSView {
+    let tap = TapControl { [weak self] in
+      guard let self else { return }
+      self.sceneListExpanded.toggle()
+      self.scheduleSync()
+    }
+    tap.toolTip = sceneListExpanded ? "Hide scenes" : "Choose a scene"
+    tap.layer?.cornerRadius = 6
+    tap.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+
+    let current = app.availableScenes.first { $0.id == app.state.scene?.id }
+    let label = NSTextField(labelWithString: current?.name ?? "Choose a scene")
+    label.font = .systemFont(ofSize: 12, weight: .medium)
+    label.lineBreakMode = .byTruncatingTail
+    label.translatesAutoresizingMaskIntoConstraints = false
+    sceneHeaderLabel = label
+
+    let chevron = NSImageView()
+    chevron.image = NSImage(
+      systemSymbolName: sceneListExpanded ? "chevron.up" : "chevron.down",
+      accessibilityDescription: nil)
+    chevron.contentTintColor = .secondaryLabelColor
+    chevron.translatesAutoresizingMaskIntoConstraints = false
+
+    tap.addSubview(label)
+    tap.addSubview(chevron)
+    tap.heightAnchor.constraint(equalToConstant: 30).isActive = true
+    NSLayoutConstraint.activate([
+      label.leadingAnchor.constraint(equalTo: tap.leadingAnchor, constant: 10),
+      label.centerYAnchor.constraint(equalTo: tap.centerYAnchor),
+      chevron.trailingAnchor.constraint(equalTo: tap.trailingAnchor, constant: -10),
+      chevron.centerYAnchor.constraint(equalTo: tap.centerYAnchor),
+      label.trailingAnchor.constraint(lessThanOrEqualTo: chevron.leadingAnchor, constant: -8),
+    ])
+    return fullWidth(tap)
+  }
+
+  /// A two-column grid of the bulb's scenes; tapping one runs it and collapses.
+  private func makeSceneGrid() -> NSView {
+    let col = NSStackView()
+    col.orientation = .vertical
+    col.alignment = .leading
+    col.spacing = 6
+    let scenes = app.availableScenes
+    var i = 0
+    while i < scenes.count {
+      let pair = NSStackView()
+      pair.orientation = .horizontal
+      pair.spacing = 6
+      pair.distribution = .fillEqually
+      for scene in scenes[i..<min(i + 2, scenes.count)] { pair.addArrangedSubview(sceneChip(scene)) }
+      if scenes.count - i == 1 { pair.addArrangedSubview(NSView()) }  // keep a lone chip half-width
+      pair.translatesAutoresizingMaskIntoConstraints = false
+      col.addArrangedSubview(pair)
+      pair.widthAnchor.constraint(equalTo: col.widthAnchor).isActive = true
+      i += 2
+    }
+    return fullWidth(col)
+  }
+
+  private func sceneChip(_ scene: LightScene) -> NSView {
+    let tap = TapControl { [weak self] in
+      self?.app.applyScene(scene.id)  // keep the grid open (and the menu) so you can pick another
+    }
+    tap.toolTip = scene.hint.isEmpty ? scene.name : "\(scene.name) — \(scene.hint)"
+    tap.layer?.cornerRadius = 6
+    tap.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+    if app.state.scene?.id == scene.id {
+      tap.layer?.borderColor = NSColor.controlAccentColor.cgColor
+      tap.layer?.borderWidth = 2
+    }
+    let label = NSTextField(labelWithString: scene.name)
+    label.font = .systemFont(ofSize: 11)
+    label.alignment = .center
+    label.lineBreakMode = .byTruncatingTail
+    label.translatesAutoresizingMaskIntoConstraints = false
+    tap.addSubview(label)
+    tap.heightAnchor.constraint(equalToConstant: 26).isActive = true
+    NSLayoutConstraint.activate([
+      label.leadingAnchor.constraint(equalTo: tap.leadingAnchor, constant: 6),
+      label.trailingAnchor.constraint(equalTo: tap.trailingAnchor, constant: -6),
+      label.centerYAnchor.constraint(equalTo: tap.centerYAnchor),
+    ])
+    return tap
+  }
+
+  private func makeSpeedRow() -> NSView {
+    let slider = GradientSliderControl()
+    slider.minValue = 1
+    slider.maxValue = 100
+    slider.value = Double(app.state.scene?.speed ?? 50)
+    // A progress track: accent-filled up to the thumb, grey after it.
+    slider.progressFill = (filled: .controlAccentColor, unfilled: Self.nsColor([90, 90, 90]))
+    slider.onEditing = { [weak self] v in self?.app.setSceneSpeed(Int(v.rounded())) }
+    speedSlider = slider
+    let row = sliderRow("speedometer", slider)
+    speedRow = row
+    return row
   }
 
   private func makeDisconnected() -> NSView {
@@ -569,7 +774,7 @@ final class DropdownContentView: NSView {
   // MARK: - Actions
 
   @objc private func modeChanged(_ sender: NSSegmentedControl) {
-    let modes = AppState.ColorMode.popoverModes
+    let modes = popoverModes
     guard sender.selectedSegment >= 0, sender.selectedSegment < modes.count else { return }
     app.setColorMode(modes[sender.selectedSegment])
   }
@@ -590,7 +795,31 @@ final class DropdownContentView: NSView {
     return "No light selected"
   }
 
+  /// Hover hint for the device name — the full (untruncated) name, then IP +
+  /// capabilities, else a state-appropriate nudge (not connected / nothing set up).
+  private var deviceTooltip: String {
+    if app.connected {
+      let details = [app.selectedIp, app.deviceSummary].filter { !$0.isEmpty }
+        .joined(separator: " · ")
+      return details.isEmpty ? app.displayName : "\(app.displayName)\n\(details)"
+    }
+    if app.hasLight { return "\(app.displayName) — not connected" }
+    return "No light selected — Discover one to get started"
+  }
+
+  /// Hover hint for each mode-picker segment.
+  private func modeTooltip(_ mode: AppState.ColorMode) -> String {
+    switch mode {
+    case .rgb: return "Colour"
+    case .white: return "White — colour temperature"
+    case .warmGlow: return "Warm Glow — temperature follows brightness"
+    case .scene: return "Dynamic scenes"
+    }
+  }
+
   private var liveNSColor: NSColor {
+    // Scenes mode: ramp the brightness track to white, not the (stale) preserved colour.
+    if app.colorMode == .scene { return Self.nsColor([255, 255, 255]) }
     let rgb = app.state.mode == .rgb ? app.state.rgb : app.core.kelvinToRgb(app.state.temp)
     return Self.nsColor(rgb)
   }
@@ -606,6 +835,7 @@ final class DropdownContentView: NSView {
       Self.nsColor(app.core.kelvinToRgb(Int(Double(lo) + $0 * Double(hi - lo))))
     }
   }
+
 
   private static func nsColor(_ rgb: [Int]) -> NSColor {
     NSColor(

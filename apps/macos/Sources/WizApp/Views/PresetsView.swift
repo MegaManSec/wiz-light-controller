@@ -183,7 +183,7 @@ private struct WarmGlowChip: View {
 /// A transparent NSView that carries a native tooltip over its whole frame.
 /// SwiftUI's `.help` only tracks drawn pixels (so it misses the chip margins);
 /// an AppKit tooltip rect covers the entire backing view reliably.
-private struct ToolTip: NSViewRepresentable {
+struct ToolTip: NSViewRepresentable {
   let text: String
   func makeNSView(context: Context) -> NSView {
     let view = NSView()

@@ -151,7 +151,7 @@ public final class WizCore {
       guard let d = item as? [String: Any], let id = JSNum.int(d["id"]),
         let name = d["name"] as? String
       else { return nil }
-      return LightScene(id: id, name: name)
+      return LightScene(id: id, name: name, hint: d["hint"] as? String ?? "")
     }
   }
 

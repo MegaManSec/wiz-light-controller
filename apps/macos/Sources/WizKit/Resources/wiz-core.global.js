@@ -26,6 +26,7 @@ var WizCore = (() => {
     DIMMING_MAX: () => DIMMING_MAX,
     DIMMING_MIN: () => DIMMING_MIN,
     SCENES: () => SCENES,
+    SCENE_HINTS: () => SCENE_HINTS,
     SPEED_MAX: () => SPEED_MAX,
     SPEED_MIN: () => SPEED_MIN,
     TEMP_MAX: () => TEMP_MAX,
@@ -55,6 +56,7 @@ var WizCore = (() => {
     rgbToHex: () => rgbToHex,
     rgbToHsv: () => rgbToHsv,
     rgbToWhiteMixed: () => rgbToWhiteMixed,
+    sceneHint: () => sceneHint,
     sceneName: () => sceneName,
     scenesForDevice: () => scenesForDevice,
     stateMatchesPreset: () => stateMatchesPreset,
@@ -390,9 +392,46 @@ var WizCore = (() => {
     31: "Pulse",
     32: "Steampunk"
   });
+  var SCENE_HINTS = Object.freeze({
+    1: "Rolling blues and teals",
+    2: "Soft warm pinks and reds",
+    3: "Orange \u2192 pink \u2192 purple fade",
+    4: "Fast multicolour cycle",
+    5: "Flickering warm orange",
+    6: "Dim, cosy warm white",
+    7: "Gentle shifting greens",
+    8: "Soft drifting pastels",
+    9: "Slowly brightens, warm \u2192 cool",
+    10: "Slowly dims to warm",
+    11: "Steady warm white",
+    12: "Neutral daylight white",
+    13: "Crisp cool white",
+    14: "Very dim warm glow",
+    15: "Bright, cool focus white",
+    16: "Soft, calm warm white",
+    17: "Saturated colour cycle",
+    18: "Muted ambient backlight",
+    19: "Magenta/pink grow light",
+    20: "Fresh greens and pastels",
+    21: "Warm, vivid summer hues",
+    22: "Ambers and deep oranges",
+    23: "Deep ocean blues",
+    24: "Greens and warm yellows",
+    25: "Lime and mint greens",
+    26: "Bold pulsing club colours",
+    27: "Festive red and green",
+    28: "Eerie orange and purple",
+    29: "Warm candle flicker",
+    30: "Warm golden white",
+    31: "Single colour, pulsing",
+    32: "Warm amber and brass"
+  });
   var WHITE_SCENE_IDS = /* @__PURE__ */ new Set([6, 9, 10, 11, 12, 13, 14, 29, 30]);
   function sceneName(id) {
     return SCENES[id] ?? null;
+  }
+  function sceneHint(id) {
+    return SCENE_HINTS[id] ?? "";
   }
   function findScene(nameOrId) {
     if (nameOrId == null) return null;
@@ -409,7 +448,7 @@ var WizCore = (() => {
   function scenesForDevice(modelConfig) {
     const { rgb, white } = deviceCapabilities(modelConfig);
     const whiteOnly = white && !rgb;
-    return Object.entries(SCENES).filter(([id]) => !whiteOnly || WHITE_SCENE_IDS.has(Number(id))).map(([id, name]) => ({ id: Number(id), name }));
+    return Object.entries(SCENES).filter(([id]) => !whiteOnly || WHITE_SCENE_IDS.has(Number(id))).map(([id, name]) => ({ id: Number(id), name, hint: SCENE_HINTS[id] ?? "" }));
   }
   return __toCommonJS(pure_exports);
 })();

@@ -34,6 +34,9 @@ struct BrightnessView: View {
 
   /// The colour the track ramps toward.
   private var tintColor: Color {
+    // In Scenes mode the colour is an animation, not one hue, so ramp to white — a
+    // neutral dark→light brightness fade rather than a stale (preserved) colour tint.
+    if app.colorMode == .scene { return Color(rgb: [255, 255, 255]) }
     let rgb = app.state.mode == .rgb ? app.state.rgb : app.core.kelvinToRgb(app.state.temp)
     return Color(rgb: rgb)
   }

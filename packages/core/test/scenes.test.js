@@ -1,6 +1,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { SCENES, sceneName, findScene, scenesForDevice } from '../src/scenes.js';
+import {
+  SCENES,
+  SCENE_HINTS,
+  sceneName,
+  sceneHint,
+  findScene,
+  scenesForDevice,
+} from '../src/scenes.js';
 
 describe('scenes: SCENES table', () => {
   it('is the 32 well-known named scenes', () => {
@@ -66,5 +73,24 @@ describe('scenes: scenesForDevice', () => {
   it('stays permissive (all 32) when capabilities are unknown', () => {
     assert.equal(scenesForDevice({}).length, 32);
     assert.equal(scenesForDevice(null).length, 32);
+  });
+});
+
+describe('scenes: hints', () => {
+  it('has a non-empty description for every scene', () => {
+    for (const id of Object.keys(SCENES)) {
+      assert.equal(typeof SCENE_HINTS[id], 'string');
+      assert.ok(SCENE_HINTS[id].length > 0, `scene ${id} should have a hint`);
+    }
+  });
+
+  it('sceneHint maps id → description, empty for unknown', () => {
+    assert.equal(sceneHint(4), 'Fast multicolour cycle');
+    assert.equal(sceneHint(999), '');
+  });
+
+  it('scenesForDevice carries the hint', () => {
+    const party = scenesForDevice(null).find((s) => s.id === 4);
+    assert.equal(party.hint, 'Fast multicolour cycle');
   });
 });

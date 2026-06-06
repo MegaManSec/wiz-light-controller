@@ -75,7 +75,9 @@ struct ControllerView: View {
             .padding(.bottom, 10)
           // Colour controls stay visible even when off, so you can stage a colour
           // or mode and have it apply when you bring the brightness back up.
-          if app.warmGlow {
+          if app.colorMode == .scene {
+            ScenesView()
+          } else if app.warmGlow {
             WarmGlowInfo()
           } else if app.state.mode == .rgb {
             ColorWheelView()
@@ -85,9 +87,10 @@ struct ControllerView: View {
             WhiteTempView()
           }
           // Brightness stays visible even when off (knob at 0) — slide up to turn
-          // the light back on and set the level.
+          // the light back on and set the level. It dims a running scene too.
           BrightnessView()
-          PresetsView()
+          // Presets are colour/white; in Scenes mode the ScenesView grid replaces them.
+          if app.colorMode != .scene { PresetsView() }
         } else if app.hasLight {
           Label(
             "Not connected — press Connect to control \(app.displayName).",
@@ -237,7 +240,7 @@ struct PowerModeBar: View {
       Spacer()
 
       Picker("Mode", selection: modeBinding) {
-        ForEach(AppState.ColorMode.allCases) { mode in
+        ForEach(app.controlsModes) { mode in
           Text(mode.label).tag(mode)
         }
       }

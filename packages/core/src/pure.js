@@ -6,3 +6,4 @@
 export * from './color.js';
 export * from './validate.js';
 export * from './model.js';
+export * from './scenes.js';

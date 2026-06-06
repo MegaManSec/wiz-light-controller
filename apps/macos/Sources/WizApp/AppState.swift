@@ -138,15 +138,19 @@ final class AppState: ObservableObject {
   /// you set only brightness and the temperature auto-follows the bulb's
   /// dim-to-warm curve (warmer as you dim).
   enum ColorMode: String, CaseIterable, Identifiable {
-    case rgb, white, warmGlow
+    case rgb, white, warmGlow, scene
     var id: String { rawValue }
     var label: String {
       switch self {
       case .rgb: return "RGB"
       case .white: return "White"
       case .warmGlow: return "Warm Glow"
+      case .scene: return "Scenes"
       }
     }
+    /// Modes shown in the compact menu-bar popover — scenes live only in the
+    /// controls window, so they're excluded here.
+    static let popoverModes: [ColorMode] = [.rgb, .white, .warmGlow]
   }
 
   /// True when Warm Glow is active (the wire mode is still white).
@@ -156,6 +160,13 @@ final class AppState: ObservableObject {
   /// channels for a much brighter, slightly less saturated result. Off = faithful
   /// pure RGB (the dimmer colour LEDs only). A per-session choice; not persisted.
   @Published var whiteMix = false
+
+  /// Dynamic scenes this bulb can show, detected read-only from `getModelConfig` on
+  /// connect. Empty until known, or for a device with no colour/white channels.
+  @Published var availableScenes: [LightScene] = []
+
+  /// The last scene applied, so re-entering Scenes mode restores it.
+  private var sceneMemory: SceneRef?
 
   /// Brightness%→Kelvin dim-to-warm curve, read from the bulb's `dim2WarmPoints`
   /// (else this sensible default), sorted by brightness.
@@ -170,10 +181,20 @@ final class AppState: ObservableObject {
   private var rgbMemory: [Int]?
   private var whiteTempMemory: Int?
 
-  /// The active mode for the 3-way picker.
+  /// The active mode for the picker.
   var colorMode: ColorMode {
+    if state.scene != nil { return .scene }
     if warmGlow { return .warmGlow }
     return state.mode == .rgb ? .rgb : .white
+  }
+
+  /// Whether this bulb supports scenes (gates the controls-window Scenes mode).
+  /// Detected read-only from `getModelConfig`; a running scene also proves it.
+  var supportsScenes: Bool { !availableScenes.isEmpty || state.scene != nil }
+
+  /// Modes offered by the controls-window picker — Scenes only when supported.
+  var controlsModes: [ColorMode] {
+    supportsScenes ? ColorMode.allCases : ColorMode.allCases.filter { $0 != .scene }
   }
 
   /// Switch modes, remembering the colour/temperature of the mode we leave and
@@ -184,7 +205,11 @@ final class AppState: ObservableObject {
     case .rgb: rgbMemory = state.rgb
     case .white: whiteTempMemory = state.temp
     case .warmGlow: break  // temperature is derived from brightness; nothing to save
+    case .scene: sceneMemory = state.scene
     }
+    // Any non-scene mode exits a running scene (sending colour/temp clears it on
+    // the bulb); entering Scenes restores the last (or first available) one.
+    if mode != .scene { state.scene = nil }
     switch mode {
     case .rgb:
       warmGlow = false
@@ -198,6 +223,9 @@ final class AppState: ObservableObject {
       warmGlow = true
       state.mode = .white
       state.temp = kelvinForBrightness(state.brightness)
+    case .scene:
+      warmGlow = false
+      state.scene = sceneMemory ?? SceneRef(id: availableScenes.first?.id ?? 4)
     }
     applyLive()
   }
@@ -321,6 +349,7 @@ final class AppState: ObservableObject {
       warmGlow = false
       rgbMemory = nil
       whiteTempMemory = nil
+      availableScenes = []
       configHost = nil
     }
     if connect {
@@ -428,6 +457,11 @@ final class AppState: ObservableObject {
           // flipping back to RGB restores their colour rather than white).
           var next = self.perceivedState(parsed, from: result)
           if next.mode == .white { next.rgb = self.state.rgb }
+          // A running scene reports no colour; keep the last one so leaving it restores.
+          if next.scene != nil {
+            next.rgb = self.state.rgb
+            next.temp = self.state.temp
+          }
           self.state = next
           self.reconcileWarmGlow(with: next)
           if next.on, next.brightness > 0 { self.lastBrightness = next.brightness }
@@ -469,6 +503,10 @@ final class AppState: ObservableObject {
           }
           if let dimMin = bounds.dimMin, dimMin > 0 { self.negotiatedDimMin = dimMin }
           self.deviceSummary = self.core.describeDevice(model)
+          // Detect scene support read-only: offer scenes only for a bulb with
+          // colour or white channels (not, say, a smart plug).
+          let caps = self.core.deviceCapabilities(model)
+          self.availableScenes = caps.rgb || caps.white ? self.core.scenesForDevice(model) : []
         }
         if let user = user {
           let curve = self.core.dimToWarmCurve(user)
@@ -567,6 +605,10 @@ final class AppState: ObservableObject {
           {
             var next = self.perceivedState(parsed, from: result)
             if next.mode == .white { next.rgb = self.state.rgb }
+            if next.scene != nil {
+              next.rgb = self.state.rgb
+              next.temp = self.state.temp
+            }
             // While the light is off, the user may be staging a colour to apply
             // when they turn it back up — don't let the poll overwrite it. Fold
             // only when the bulb is on, or an on/off flip happened elsewhere.
@@ -703,12 +745,35 @@ final class AppState: ObservableObject {
   /// temperature follows), turn on, and send.
   func applyWarmGlowPreset(_ preset: WarmGlowPreset) {
     warmGlow = true
+    state.scene = nil
     state.mode = .white
     state.on = true
     setBrightness(preset.brightness)
     commitBrightnessMemory()
     applyLive()
   }
+
+  // MARK: - Scenes
+
+  /// Run a dynamic scene (turns the light on). Keeps the current speed unless one
+  /// is given; remembers the choice so re-entering Scenes mode restores it.
+  func applyScene(_ id: Int, speed: Int? = nil) {
+    state.on = true
+    state.scene = SceneRef(id: id, speed: speed ?? state.scene?.speed)
+    sceneMemory = state.scene
+    applyLive()
+  }
+
+  /// Set the running scene's animation speed (10–200). No-op without a scene.
+  func setSceneSpeed(_ speed: Int) {
+    guard state.scene != nil else { return }
+    state.scene?.speed = core.clampSpeed(speed)
+    sceneMemory = state.scene
+    applyLive()
+  }
+
+  /// True if `id` is the running scene (drives the active highlight).
+  func isSceneActive(_ id: Int) -> Bool { state.scene?.id == id }
 
   // MARK: - Saved lights
 
@@ -798,6 +863,7 @@ final class AppState: ObservableObject {
     if clamped == [0, 0, 0] { return }
     state.rgb = clamped
     state.mode = .rgb
+    state.scene = nil  // picking a colour exits any active scene
     applyLive()
   }
 

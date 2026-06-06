@@ -25,6 +25,7 @@ var WizCore = (() => {
     DEFAULT_STATE: () => DEFAULT_STATE,
     DIMMING_MAX: () => DIMMING_MAX,
     DIMMING_MIN: () => DIMMING_MIN,
+    SCENES: () => SCENES,
     SPEED_MAX: () => SPEED_MAX,
     SPEED_MIN: () => SPEED_MIN,
     TEMP_MAX: () => TEMP_MAX,
@@ -40,6 +41,7 @@ var WizCore = (() => {
     deviceBoundsFromConfig: () => deviceBoundsFromConfig,
     deviceCapabilities: () => deviceCapabilities,
     dimToWarmCurveFromConfig: () => dimToWarmCurveFromConfig,
+    findScene: () => findScene,
     formatMac: () => formatMac,
     hexToRgb: () => hexToRgb,
     hsToWheel: () => hsToWheel,
@@ -53,6 +55,8 @@ var WizCore = (() => {
     rgbToHex: () => rgbToHex,
     rgbToHsv: () => rgbToHsv,
     rgbToWhiteMixed: () => rgbToWhiteMixed,
+    sceneName: () => sceneName,
+    scenesForDevice: () => scenesForDevice,
     stateMatchesPreset: () => stateMatchesPreset,
     toDimming: () => toDimming,
     warmGlowKelvin: () => warmGlowKelvin,
@@ -350,5 +354,62 @@ var WizCore = (() => {
       "Dim White": { mode: "white", temp: 6500, brightness: 40 }
     }
   });
+
+  // packages/core/src/scenes.js
+  var SCENES = Object.freeze({
+    1: "Ocean",
+    2: "Romance",
+    3: "Sunset",
+    4: "Party",
+    5: "Fireplace",
+    6: "Cozy",
+    7: "Forest",
+    8: "Pastel Colors",
+    9: "Wake-up",
+    10: "Bedtime",
+    11: "Warm White",
+    12: "Daylight",
+    13: "Cool White",
+    14: "Night Light",
+    15: "Focus",
+    16: "Relax",
+    17: "True Colors",
+    18: "TV Time",
+    19: "Plantgrowth",
+    20: "Spring",
+    21: "Summer",
+    22: "Fall",
+    23: "Deepdive",
+    24: "Jungle",
+    25: "Mojito",
+    26: "Club",
+    27: "Christmas",
+    28: "Halloween",
+    29: "Candlelight",
+    30: "Golden White",
+    31: "Pulse",
+    32: "Steampunk"
+  });
+  var WHITE_SCENE_IDS = /* @__PURE__ */ new Set([6, 9, 10, 11, 12, 13, 14, 29, 30]);
+  function sceneName(id) {
+    return SCENES[id] ?? null;
+  }
+  function findScene(nameOrId) {
+    if (nameOrId == null) return null;
+    const asNum = Number(nameOrId);
+    if (Number.isInteger(asNum) && SCENES[asNum]) return { id: asNum, name: SCENES[asNum] };
+    if (typeof nameOrId === "string") {
+      const needle = nameOrId.trim().toLowerCase();
+      for (const [id, name] of Object.entries(SCENES)) {
+        if (name.toLowerCase() === needle) return { id: Number(id), name };
+      }
+    }
+    return null;
+  }
+  function scenesForDevice(modelConfig) {
+    const { rgb, white } = deviceCapabilities(modelConfig);
+    const whiteOnly = white && !rgb;
+    return Object.entries(SCENES).filter(([id]) => !whiteOnly || WHITE_SCENE_IDS.has(Number(id))).map(([id, name]) => ({ id: Number(id), name }));
+  }
   return __toCommonJS(pure_exports);
 })();

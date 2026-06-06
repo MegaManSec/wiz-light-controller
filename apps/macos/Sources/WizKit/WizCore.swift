@@ -96,6 +96,7 @@ public final class WizCore {
   public func formatMac(_ mac: String) -> String { call("formatMac", [mac]).toString() ?? mac }
   public func clampBrightness(_ n: Int) -> Int { Int(call("clampBrightness", [n]).toInt32()) }
   public func clampTemp(_ k: Int) -> Int { Int(call("clampTemp", [k]).toInt32()) }
+  public func clampSpeed(_ n: Int) -> Int { Int(call("clampSpeed", [n]).toInt32()) }
 
   // MARK: - Model
 
@@ -128,6 +129,30 @@ public final class WizCore {
   /// device doesn't report enough to tell.
   public func describeDevice(_ modelConfig: [String: Any]) -> String {
     call("describeDevice", [modelConfig]).toString() ?? ""
+  }
+
+  /// The device's colour capabilities from a `getModelConfig` result (shared engine) —
+  /// used to decide whether to offer scenes.
+  public func deviceCapabilities(_ modelConfig: [String: Any]) -> (
+    rgb: Bool, tunableWhite: Bool, white: Bool
+  ) {
+    let d = call("deviceCapabilities", [modelConfig]).toDictionary() as? [String: Any] ?? [:]
+    return (
+      (d["rgb"] as? NSNumber)?.boolValue ?? false,
+      (d["tunableWhite"] as? NSNumber)?.boolValue ?? false,
+      (d["white"] as? NSNumber)?.boolValue ?? false
+    )
+  }
+
+  /// The dynamic scenes a device can show, from a `getModelConfig` result (shared engine).
+  public func scenesForDevice(_ modelConfig: [String: Any]) -> [LightScene] {
+    guard let raw = call("scenesForDevice", [modelConfig]).toArray() else { return [] }
+    return raw.compactMap { item in
+      guard let d = item as? [String: Any], let id = JSNum.int(d["id"]),
+        let name = d["name"] as? String
+      else { return nil }
+      return LightScene(id: id, name: name)
+    }
   }
 
   /// Dim-to-warm curve parsed from a `getUserConfig` result, via the shared engine.

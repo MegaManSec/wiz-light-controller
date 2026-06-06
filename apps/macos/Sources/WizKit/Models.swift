@@ -22,9 +22,11 @@ public struct SceneRef: Equatable {
 public struct LightScene: Identifiable, Equatable {
   public let id: Int
   public let name: String
-  public init(id: Int, name: String) {
+  public let hint: String  // short colour/effect description (approximate)
+  public init(id: Int, name: String, hint: String = "") {
     self.id = id
     self.name = name
+    self.hint = hint
   }
 }
 

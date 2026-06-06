@@ -91,6 +91,7 @@ final class WizCoreTests: XCTestCase {
     let scenes = core.scenesForDevice(rgbModel)
     XCTAssertEqual(scenes.count, 32)
     XCTAssertTrue(scenes.contains { $0.id == 4 && $0.name == "Party" })
+    XCTAssertFalse(scenes.first(where: { $0.id == 4 })?.hint.isEmpty ?? true)
 
     // A scene round-trips through the wire format and back.
     let state = LightState(

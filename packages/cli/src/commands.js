@@ -13,7 +13,6 @@ import {
   parsePilot,
   buildSetPilotParams,
   applyPreset,
-  SCENES,
   findScene,
   scenesForDevice,
   sceneName,
@@ -301,21 +300,18 @@ async function liveStateOrDefault(ip) {
 }
 
 async function cmdScenes({ positionals, values, stores }) {
-  // List all scenes by default; if a bulb is given (or remembered) and reachable,
-  // narrow to the ones it can actually show.
-  let list = Object.entries(SCENES).map(([id, name]) => ({ id: Number(id), name }));
+  // scenesForDevice(null) returns all 32, so an unreachable/omitted bulb still
+  // lists them; a reachable one narrows to what it can actually show.
   const ip = positionals[0] ?? (await stores.lastState.loadIp());
-  if (ip && isValidIp(ip)) {
-    const model = await getModelConfig(ip);
-    if (model) list = scenesForDevice(model);
-  }
+  const model = ip && isValidIp(ip) ? await getModelConfig(ip) : null;
+  const list = scenesForDevice(model);
   if (values.json) {
     print(JSON.stringify(list, null, 2));
     return;
   }
   print(bold('Scenes'));
-  for (const { id, name } of list) {
-    print(`  ${dim(String(id).padStart(2))}  ${cyan(name)}`);
+  for (const { id, name, hint } of list) {
+    print(`  ${dim(String(id).padStart(2))}  ${cyan(name)}${hint ? dim(` — ${hint}`) : ''}`);
   }
 }
 

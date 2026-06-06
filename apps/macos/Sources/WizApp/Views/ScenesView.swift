@@ -63,9 +63,13 @@ private struct SceneChip: View {
           RoundedRectangle(cornerRadius: 8)
             .strokeBorder(active ? Color.accentColor : .clear, lineWidth: 2))
         .contentShape(Rectangle())
+        .background(ToolTip(text: tooltip))
     }
     .buttonStyle(.plain)
   }
+
+  /// Tooltip: the scene name plus its (approximate) colour/effect hint.
+  private var tooltip: String { scene.hint.isEmpty ? scene.name : "\(scene.name) — \(scene.hint)" }
 
   private var active: Bool { app.isSceneActive(scene.id) }
 }

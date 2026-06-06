@@ -155,6 +155,10 @@ final class AppState: ObservableObject {
 
   /// True when Warm Glow is active (the wire mode is still white).
   @Published var warmGlow = false
+  /// True while the brightness slider is being dragged — lets the locked Warm Glow
+  /// temperature follow brightness down to its warmest end at 0, then settle to the
+  /// saved level on release (a plain power-toggle leaves it put).
+  @Published var isDraggingBrightness = false
 
   /// RGB-only: route a colour's achromatic part through the bulb's bright white
   /// channels for a much brighter, slightly less saturated result. Off = faithful
@@ -228,6 +232,7 @@ final class AppState: ObservableObject {
       state.scene = sceneMemory ?? SceneRef(id: availableScenes.first?.id ?? 4)
     }
     applyLive()
+    reconcileSoon()
   }
 
   /// Set brightness; in Warm Glow the temperature follows the curve. Caller sends.
@@ -273,6 +278,16 @@ final class AppState: ObservableObject {
     let usable = max(1, min(100, brightness))
     let scaled = Int((Double(usable - 1) / 99 * 100).rounded())
     return core.warmGlowKelvin(scaled, curve: dimToWarmCurve, range: tempRange)
+  }
+
+  /// The colour temperature Warm Glow displays: the live brightness's curve value
+  /// when on, or the saved restore level's when off — so sliding brightness to 0
+  /// doesn't strand the locked Temperature slider at a stale value.
+  var warmGlowDisplayKelvin: Int {
+    if state.on { return kelvinForBrightness(state.brightness) }
+    // Off: while still dragging brightness, follow it down to the warmest (lowest)
+    // end (0); once settled — drag released or toggled off — sit at the saved level.
+    return kelvinForBrightness(isDraggingBrightness ? 0 : lastBrightness)
   }
 
   // MARK: - Persistence
@@ -633,6 +648,53 @@ final class AppState: ObservableObject {
 
   // MARK: - Commands (debounced via WizClient)
 
+  /// After a discrete change (mode switch, scene, preset) is pushed, read the bulb
+  /// back once it's had a moment to apply — so the UI settles to the values the
+  /// light *actually* adopted (a scene's real colours, a device-clamped
+  /// temperature) instead of waiting up to 15 s for the housekeeping poll. Two
+  /// staggered reads ride out the send debounce + a dropped datagram; each folds in
+  /// only if no newer local edit has happened since, so it never yanks a slider the
+  /// user started dragging in between.
+  func reconcileSoon() {
+    guard connected, client != nil else { return }
+    let host = selectedIp
+    let editToken = lastLocalEdit
+    for delay in [0.7, 1.6] {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        guard let self = self, self.lastLocalEdit == editToken else { return }
+        self.readback(host: host, editToken: editToken)
+      }
+    }
+  }
+
+  /// One post-change read-back: fold the bulb's reported state in (unlike the poll,
+  /// without the 3 s quiet-window wait — the user expects the click to settle to the
+  /// device's truth), but bail if a newer local edit has superseded it.
+  private func readback(host: String, editToken: Date) {
+    guard selectedIp == host, connected, let client = client else { return }
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      let result = client.getPilot(host: host)
+      DispatchQueue.main.async {
+        guard let self = self, self.selectedIp == host, self.connected,
+          self.lastLocalEdit == editToken,
+          let result = result, let parsed = self.core.parsePilot(result)
+        else { return }
+        var next = self.perceivedState(parsed, from: result)
+        if next.mode == .white { next.rgb = self.state.rgb }
+        if next.scene != nil {
+          next.rgb = self.state.rgb
+          next.temp = self.state.temp
+        }
+        if self.state.on || next.on, next != self.state {
+          self.state = next
+          self.reconcileWarmGlow(with: next)
+        }
+        if next.on, next.brightness > 0 { self.lastBrightness = next.brightness }
+        self.bump()
+      }
+    }
+  }
+
   /// Push the current `state` to the bulb (debounced + retried in `WizClient`).
   func applyLive() {
     guard let client = client else { return }
@@ -682,6 +744,7 @@ final class AppState: ObservableObject {
     if state.mode == .white { state.temp = clampTemp(state.temp) }
     commitBrightnessMemory()
     applyLive()
+    reconcileSoon()
   }
 
   /// True if the live state matches `preset` (drives the active highlight).
@@ -762,6 +825,7 @@ final class AppState: ObservableObject {
     state.scene = SceneRef(id: id, speed: speed ?? state.scene?.speed)
     sceneMemory = state.scene
     applyLive()
+    reconcileSoon()
   }
 
   /// Set the running scene's animation speed (10–200). No-op without a scene.

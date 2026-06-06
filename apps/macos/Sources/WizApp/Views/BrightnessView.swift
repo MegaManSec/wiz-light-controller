@@ -21,7 +21,11 @@ struct BrightnessView: View {
         value: brightnessBinding,
         range: 0...100,
         colors: [Color(rgb: [43, 43, 43]), tintColor],
-        onCommit: { app.commitBrightnessMemory() })
+        onEditing: { app.isDraggingBrightness = true },
+        onCommit: {
+          app.isDraggingBrightness = false
+          app.commitBrightnessMemory()
+        })
     }
   }
 
@@ -74,5 +78,47 @@ struct WhiteTempView: View {
         let snapped = Int(($0 / 100).rounded()) * 100
         app.state.temp = app.clampTemp(snapped)
       })
+  }
+}
+
+/// Warm Glow's colour temperature — a *locked* slider showing where the auto
+/// temperature (which follows brightness via the bulb's dim-to-warm curve)
+/// currently sits. Read-only: in this mode you set brightness, and the temperature
+/// tracks it (down to its warmest end as brightness hits 0).
+struct WarmGlowTempView: View {
+  @EnvironmentObject var app: AppState
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack {
+        Label("Temperature", systemImage: "thermometer.medium")
+          .font(.subheadline)
+        Spacer()
+        Text("\(app.warmGlowDisplayKelvin)K")
+          .font(.caption.monospacedDigit())
+          .foregroundStyle(.secondary)
+      }
+      GradientSlider(
+        value: .constant(thumbTemp),
+        range: warmGlowRange,
+        colors: [Color(rgb: app.core.kelvinToRgb(app.tempRange.lowerBound)),
+                 Color(rgb: [255, 255, 255])])
+        .disabled(true)
+        .opacity(0.8)
+      Label("Follows brightness automatically", systemImage: "lock.fill")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+  }
+
+  /// The full device white range (same bar as the White tab); the thumb sits where
+  /// the auto temperature currently falls — Warm Glow only sweeps the warm part of it.
+  private var warmGlowRange: ClosedRange<Double> {
+    Double(app.tempRange.lowerBound)...Double(app.tempRange.upperBound)
+  }
+
+  /// Displayed temperature, clamped into the bar's range for the (locked) thumb.
+  private var thumbTemp: Double {
+    min(max(Double(app.warmGlowDisplayKelvin), warmGlowRange.lowerBound), warmGlowRange.upperBound)
   }
 }

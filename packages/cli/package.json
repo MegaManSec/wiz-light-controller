@@ -1,6 +1,6 @@
 {
   "name": "wiz-light-cli",
-  "version": "0.2.9",
+  "version": "0.3.0",
   "description": "Fast, local, cloud-free command-line controller for Philips WiZ lights.",
   "license": "GPL-3.0-or-later",
   "homepage": "https://github.com/MegaManSec/wiz-light-controller#readme",

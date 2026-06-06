@@ -3,7 +3,8 @@ import WizKit
 
 /// The dynamic-scene picker, shown when the controls-window mode is "Scenes".
 /// A grid of the scenes this bulb supports (detected on connect) — clicking runs
-/// one and the active scene is ringed — plus a speed slider for the running scene.
+/// one and the active scene is ringed. The running scene's speed lives in
+/// `SceneSpeedView`, placed below brightness in the controls window.
 struct ScenesView: View {
   @EnvironmentObject var app: AppState
 
@@ -17,30 +18,34 @@ struct ScenesView: View {
           SceneChip(scene: scene)
         }
       }
-      // Speed only matters while a scene is running (and only animated ones honour
-      // it, but the bulb ignores it harmlessly otherwise).
-      if app.state.scene != nil {
-        speedRow
-      }
     }
   }
+}
 
-  private var speedRow: some View {
-    HStack(spacing: 10) {
-      Text("Speed")
-        .font(.caption.monospaced())
-        .frame(width: 44, alignment: .leading)
-      Slider(
+/// The running scene's speed — a labelled, full-length slider matching the
+/// brightness/temperature sliders (only animated scenes honour it, but the bulb
+/// ignores it harmlessly otherwise).
+struct SceneSpeedView: View {
+  @EnvironmentObject var app: AppState
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack {
+        Label("Speed", systemImage: "speedometer")
+          .font(.subheadline)
+        Spacer()
+        Text("\(app.state.scene?.speed ?? 50)%")
+          .font(.caption.monospacedDigit())
+          .foregroundStyle(.secondary)
+      }
+      GradientSlider(
         value: Binding(
-          get: { Double(app.state.scene?.speed ?? 100) },
+          get: { Double(app.state.scene?.speed ?? 50) },
           set: { app.setSceneSpeed(Int($0.rounded())) }),
-        in: 1...100)
-      Text("\(app.state.scene?.speed ?? 100)")
-        .font(.caption.monospacedDigit())
-        .foregroundStyle(.secondary)
-        .frame(width: 36, alignment: .trailing)
+        range: 1...100,
+        colors: [],
+        progressFill: (filled: .accentColor, unfilled: Color(rgb: [90, 90, 90])))
     }
-    .padding(.top, 2)
   }
 }
 

@@ -75,21 +75,28 @@ struct ControllerView: View {
             .padding(.bottom, 10)
           // Colour controls stay visible even when off, so you can stage a colour
           // or mode and have it apply when you bring the brightness back up.
-          if app.colorMode == .scene {
-            ScenesView()
-          } else if app.warmGlow {
-            WarmGlowInfo()
-          } else if app.state.mode == .rgb {
+          // Brightness stays visible even when off (knob at 0) — slide up to turn
+          // the light back on and set the level. It sits above whatever depends on it
+          // (scene speed, white temperature, the Warm Glow curve); RGB leads with the wheel.
+          switch app.colorMode {
+          case .rgb:
             ColorWheelView()
             SlidersView()
             WhiteMixToggle()
-          } else {
+            BrightnessView()
+          case .white:
+            BrightnessView()
             WhiteTempView()
+          case .warmGlow:
+            BrightnessView()
+            WarmGlowTempView()
+          case .scene:
+            ScenesView()
+            BrightnessView()
+            // Speed only matters while a scene is running.
+            if app.state.scene != nil { SceneSpeedView() }
           }
-          // Brightness stays visible even when off (knob at 0) — slide up to turn
-          // the light back on and set the level. It dims a running scene too.
-          BrightnessView()
-          // Presets are colour/white; in Scenes mode the ScenesView grid replaces them.
+          // Presets are colour/white/warm-glow; the Scenes grid replaces them.
           if app.colorMode != .scene { PresetsView() }
         } else if app.hasLight {
           Label(
@@ -257,27 +264,6 @@ struct PowerModeBar: View {
 
   private var modeBinding: Binding<AppState.ColorMode> {
     Binding(get: { app.colorMode }, set: { app.setColorMode($0) })
-  }
-}
-
-/// Warm Glow caption: in this mode you set only brightness and the colour
-/// temperature auto-follows the bulb's dim-to-warm curve.
-struct WarmGlowInfo: View {
-  @EnvironmentObject var app: AppState
-
-  var body: some View {
-    HStack(spacing: 10) {
-      Image(systemName: "flame.fill")
-        .foregroundStyle(.orange)
-      VStack(alignment: .leading, spacing: 2) {
-        Text("Warm Glow").font(.subheadline.weight(.medium))
-        Text("Colour temperature follows brightness — now ≈ \(app.state.temp) K")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-      Spacer()
-    }
-    .padding(.vertical, 4)
   }
 }
 

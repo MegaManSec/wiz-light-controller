@@ -95,14 +95,14 @@ final class WizCoreTests: XCTestCase {
     // A scene round-trips through the wire format and back.
     let state = LightState(
       on: true, mode: .rgb, rgb: [255, 255, 255], temp: 4000, brightness: 80,
-      scene: SceneRef(id: 4, speed: 120))
+      scene: SceneRef(id: 4, speed: 70))
     let p = core.buildSetPilotParams(state)
     XCTAssertEqual(JSNum.int(p["sceneId"]), 4)
-    XCTAssertEqual(JSNum.int(p["speed"]), 120)
+    XCTAssertEqual(JSNum.int(p["speed"]), 70)
 
-    let parsed = core.parsePilot(["state": true, "sceneId": 4, "speed": 120, "dimming": 80])
+    let parsed = core.parsePilot(["state": true, "sceneId": 4, "speed": 70, "dimming": 80])
     XCTAssertEqual(parsed?.scene?.id, 4)
-    XCTAssertEqual(parsed?.scene?.speed, 120)
+    XCTAssertEqual(parsed?.scene?.speed, 70)
   }
 
   func testPresets() {

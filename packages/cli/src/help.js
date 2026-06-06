@@ -78,11 +78,11 @@ export const COMMANDS = {
   },
   scene: {
     summary: 'Run a dynamic scene',
-    usage: 'wiz scene [<ip>] <name|id> [--speed <10-200>] [--brightness <0-100>]',
+    usage: 'wiz scene [<ip>] <name|id> [--speed <1-100>] [--brightness <0-100>]',
     details: [
       'Accepts a scene name (case-insensitive) or its id — see `wiz scenes`.',
       '',
-      '  --speed <10-200>       Animation speed (default: keep the bulb’s current)',
+      '  --speed <1-100>       Animation speed (default: keep the bulb’s current)',
       '  --brightness <0-100>   Brightness percent',
       '',
       'Examples:',

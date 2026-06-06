@@ -191,8 +191,8 @@ var WizCore = (() => {
   }
   var clampBrightness = (n) => clampInt(n, 0, 100);
   var clampTemp = (k) => clampInt(k, TEMP_MIN, TEMP_MAX);
-  var SPEED_MIN = 10;
-  var SPEED_MAX = 200;
+  var SPEED_MIN = 1;
+  var SPEED_MAX = 100;
   var clampSpeed = (n) => clampInt(n, SPEED_MIN, SPEED_MAX);
   var toDimming = (brightness) => clampInt(brightness, DIMMING_MIN, DIMMING_MAX);
   var clampRgb = (rgb) => rgb.map((c) => clampInt(c, 0, 255));

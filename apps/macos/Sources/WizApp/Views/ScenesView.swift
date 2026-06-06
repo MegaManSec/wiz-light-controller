@@ -34,7 +34,7 @@ struct ScenesView: View {
         value: Binding(
           get: { Double(app.state.scene?.speed ?? 100) },
           set: { app.setSceneSpeed(Int($0.rounded())) }),
-        in: 10...200)
+        in: 1...100)
       Text("\(app.state.scene?.speed ?? 100)")
         .font(.caption.monospacedDigit())
         .foregroundStyle(.secondary)

@@ -46,6 +46,13 @@ export const clampBrightness = (n) => clampInt(n, 0, 100);
 /** Clamp a colour temperature to the WiZ-supported Kelvin range. */
 export const clampTemp = (k) => clampInt(k, TEMP_MIN, TEMP_MAX);
 
+/** Dynamic-scene animation speed band the bulb meaningfully honours. */
+export const SPEED_MIN = 10;
+export const SPEED_MAX = 200;
+
+/** Clamp a dynamic-scene speed to the meaningful [10, 200] band. */
+export const clampSpeed = (n) => clampInt(n, SPEED_MIN, SPEED_MAX);
+
 /**
  * Convert a 0–100 brightness percentage to a wire `dimming` value, clamped to
  * the firmware-accepted [10, 100] band. (The original sent 0–100 verbatim, so a

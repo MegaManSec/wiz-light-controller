@@ -7,6 +7,7 @@ import {
   clampTemp,
   clampRgb,
   clampInt,
+  clampSpeed,
   DIMMING_MIN,
   DIMMING_MAX,
 } from './validate.js';
@@ -19,6 +20,7 @@ import { TEMP_MIN, TEMP_MAX } from './color.js';
  * @property {[number, number, number]} rgb   Last RGB colour (0–255).
  * @property {number} temp                    Last white temperature (Kelvin).
  * @property {number} brightness              0–100.
+ * @property {{ id: number, speed?: number }} [scene]  Set only while a dynamic scene runs.
  */
 
 /** @type {LightState} */
@@ -34,7 +36,8 @@ export const DEFAULT_STATE = Object.freeze({
  * Interpret a `getPilot` result into a {@link LightState}, or `null` if the
  * response is empty/unusable. The bulb reports RGB *and* temp fields, so mode is
  * inferred exactly as the original did: RGB wins when r/g/b are present and not
- * all zero, otherwise a present `temp` means white mode.
+ * all zero, otherwise a present `temp` means white mode. A running dynamic scene
+ * (non-zero `sceneId`) takes precedence and is surfaced as `scene`.
  *
  * @param {Record<string, unknown>|null|undefined} result
  * @returns {LightState|null}
@@ -45,6 +48,15 @@ export function parsePilot(result) {
   const on = result.state === undefined ? true : Boolean(result.state);
   const brightness =
     result.dimming === undefined ? DEFAULT_STATE.brightness : clampBrightness(result.dimming);
+
+  // A running dynamic scene reports a non-zero `sceneId` (and no r/g/b); surface
+  // it so the UI can show e.g. "Party · speed 120". `sceneId` 0 means "no scene".
+  const sceneId = Number(result.sceneId);
+  if (Number.isInteger(sceneId) && sceneId > 0) {
+    const scene = { id: sceneId };
+    if (result.speed != null) scene.speed = clampSpeed(result.speed);
+    return { on, mode: 'rgb', rgb: DEFAULT_STATE.rgb, temp: DEFAULT_STATE.temp, brightness, scene };
+  }
 
   const { r, g, b, temp } = result;
   const hasRgb = r != null && g != null && b != null && (r || g || b);
@@ -61,7 +73,8 @@ export function parsePilot(result) {
 
 /**
  * Build the `setPilot` `params` for a desired {@link LightState}. When off, only
- * `{ state: false }` is sent. Optional per-device `bounds` (the bulb's real
+ * `{ state: false }` is sent. A `state.scene` overrides colour/temp — it emits
+ * `sceneId` (+ optional `speed`) with dimming. Optional per-device `bounds` (the bulb's real
  * `minDimLevel` and `cctRange`, negotiated from `getModelConfig`) clamp the wire
  * values to what that specific bulb supports; without them the WiZ-standard
  * defaults (`DIMMING_MIN`, `TEMP_MIN`/`TEMP_MAX`) apply.
@@ -81,6 +94,13 @@ export function buildSetPilotParams(state, bounds = {}, { whiteMix = false } = {
   const tempMax = bounds.tempMax ?? TEMP_MAX;
 
   const params = { state: true, dimming: clampInt(state.brightness, dimMin, DIMMING_MAX) };
+  if (state.scene) {
+    // A dynamic scene overrides colour/temp; speed is optional (omitted keeps the
+    // bulb's current speed). Dimming still applies.
+    params.sceneId = Number(state.scene.id);
+    if (state.scene.speed != null) params.speed = clampSpeed(state.scene.speed);
+    return params;
+  }
   if (state.mode === 'white') {
     params.temp = clampInt(state.temp, tempMin, tempMax);
   } else if (whiteMix) {
@@ -135,19 +155,20 @@ export function deviceBoundsFromConfig(modelConfig) {
 }
 
 /**
- * A short, human capability summary derived from a `getModelConfig` result —
- * e.g. `"RGB + tunable white 2700–6500 K"`. Read entirely from what the device
- * reports: the count of *active* PWM channels (`pwmRanges`, pairs of `[lo, hi]`),
- * the white-channel count (`nowc`), and the white range (`cctRange`, via
- * {@link deviceBoundsFromConfig}). Three or more active channels means colour (a
- * white-only light has at most two: cool + warm), so we never claim a capability
- * the device doesn't expose. Returns `''` when nothing is determinable.
+ * The device's colour capabilities, read from a `getModelConfig` result: whether
+ * it has RGB LEDs (≥3 *active* PWM channels — a white-only light has at most two,
+ * cool + warm), tunable white (a real `cctRange` or ≥2 white channels via `nowc`),
+ * and any white at all, plus the white range. The single source for
+ * {@link describeDevice} and {@link scenesForDevice}; never claims a capability the
+ * device doesn't expose. All false when nothing is determinable.
  *
  * @param {Record<string, unknown>|null|undefined} modelConfig
- * @returns {string}
+ * @returns {{ rgb: boolean, tunableWhite: boolean, white: boolean, tempMin?: number, tempMax?: number }}
  */
-export function describeDevice(modelConfig) {
-  if (!modelConfig || typeof modelConfig !== 'object') return '';
+export function deviceCapabilities(modelConfig) {
+  if (!modelConfig || typeof modelConfig !== 'object') {
+    return { rgb: false, tunableWhite: false, white: false };
+  }
   const { tempMin, tempMax } = deviceBoundsFromConfig(modelConfig);
 
   // Count active PWM channels — pairs [lo, hi] with hi > lo — ignoring padding.
@@ -158,16 +179,35 @@ export function describeDevice(modelConfig) {
   }
   const whiteChannels = Number(modelConfig.nowc);
 
-  const hasRgb = channels >= 3;
   const hasRange = Number.isFinite(tempMin) && Number.isFinite(tempMax) && tempMin < tempMax;
-  const hasTunableWhite = hasRange || whiteChannels >= 2;
-  const hasWhite = hasTunableWhite || Number.isFinite(tempMin) || whiteChannels >= 1;
+  const tunableWhite = hasRange || whiteChannels >= 2;
+  const white = tunableWhite || Number.isFinite(tempMin) || whiteChannels >= 1;
+
+  // tempMin/tempMax only when the bulb reports a range (so the result matches the
+  // not-determinable path above, rather than carrying explicit `undefined`s).
+  const caps = { rgb: channels >= 3, tunableWhite, white };
+  if (Number.isFinite(tempMin)) caps.tempMin = tempMin;
+  if (Number.isFinite(tempMax)) caps.tempMax = tempMax;
+  return caps;
+}
+
+/**
+ * A short, human capability summary derived from a `getModelConfig` result —
+ * e.g. `"RGB + tunable white 2700–6500 K"`, via {@link deviceCapabilities}.
+ * Returns `''` when nothing is determinable.
+ *
+ * @param {Record<string, unknown>|null|undefined} modelConfig
+ * @returns {string}
+ */
+export function describeDevice(modelConfig) {
+  const { rgb, tunableWhite, white, tempMin, tempMax } = deviceCapabilities(modelConfig);
+  const hasRange = Number.isFinite(tempMin) && Number.isFinite(tempMax) && tempMin < tempMax;
 
   const parts = [];
-  if (hasRgb) parts.push('RGB');
-  if (hasTunableWhite) {
+  if (rgb) parts.push('RGB');
+  if (tunableWhite) {
     parts.push(hasRange ? `tunable white ${tempMin}–${tempMax} K` : 'tunable white');
-  } else if (hasWhite) {
+  } else if (white) {
     parts.push('white');
   }
   return parts.join(' + ');
@@ -226,14 +266,17 @@ export function warmGlowKelvin(brightness, curve = [], range = {}) {
  * @property {number} brightness
  */
 
-/** Apply a preset on top of a state, returning a new state. */
+/** Apply a preset on top of a state, returning a new state. Any active scene is
+ *  cleared — a preset is a static colour/white, so it exits scene mode. */
 export function applyPreset(state, preset) {
   const brightness = clampBrightness(preset.brightness ?? state.brightness);
+  const base = { ...state };
+  delete base.scene;
   if (preset.mode === 'white') {
-    return { ...state, on: true, mode: 'white', temp: clampTemp(preset.temp), brightness };
+    return { ...base, on: true, mode: 'white', temp: clampTemp(preset.temp), brightness };
   }
   return {
-    ...state,
+    ...base,
     on: true,
     mode: 'rgb',
     rgb: clampRgb([preset.r, preset.g, preset.b]),

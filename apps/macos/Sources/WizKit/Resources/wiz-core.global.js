@@ -25,6 +25,8 @@ var WizCore = (() => {
     DEFAULT_STATE: () => DEFAULT_STATE,
     DIMMING_MAX: () => DIMMING_MAX,
     DIMMING_MIN: () => DIMMING_MIN,
+    SPEED_MAX: () => SPEED_MAX,
+    SPEED_MIN: () => SPEED_MIN,
     TEMP_MAX: () => TEMP_MAX,
     TEMP_MIN: () => TEMP_MIN,
     applyPreset: () => applyPreset,
@@ -32,9 +34,11 @@ var WizCore = (() => {
     clampBrightness: () => clampBrightness,
     clampInt: () => clampInt,
     clampRgb: () => clampRgb,
+    clampSpeed: () => clampSpeed,
     clampTemp: () => clampTemp,
     describeDevice: () => describeDevice,
     deviceBoundsFromConfig: () => deviceBoundsFromConfig,
+    deviceCapabilities: () => deviceCapabilities,
     dimToWarmCurveFromConfig: () => dimToWarmCurveFromConfig,
     formatMac: () => formatMac,
     hexToRgb: () => hexToRgb,
@@ -183,6 +187,9 @@ var WizCore = (() => {
   }
   var clampBrightness = (n) => clampInt(n, 0, 100);
   var clampTemp = (k) => clampInt(k, TEMP_MIN, TEMP_MAX);
+  var SPEED_MIN = 10;
+  var SPEED_MAX = 200;
+  var clampSpeed = (n) => clampInt(n, SPEED_MIN, SPEED_MAX);
   var toDimming = (brightness) => clampInt(brightness, DIMMING_MIN, DIMMING_MAX);
   var clampRgb = (rgb) => rgb.map((c) => clampInt(c, 0, 255));
 
@@ -198,6 +205,12 @@ var WizCore = (() => {
     if (!result || typeof result !== "object") return null;
     const on = result.state === void 0 ? true : Boolean(result.state);
     const brightness = result.dimming === void 0 ? DEFAULT_STATE.brightness : clampBrightness(result.dimming);
+    const sceneId = Number(result.sceneId);
+    if (Number.isInteger(sceneId) && sceneId > 0) {
+      const scene = { id: sceneId };
+      if (result.speed != null) scene.speed = clampSpeed(result.speed);
+      return { on, mode: "rgb", rgb: DEFAULT_STATE.rgb, temp: DEFAULT_STATE.temp, brightness, scene };
+    }
     const { r, g, b, temp } = result;
     const hasRgb = r != null && g != null && b != null && (r || g || b);
     if (hasRgb) {
@@ -214,6 +227,11 @@ var WizCore = (() => {
     const tempMin = bounds.tempMin ?? TEMP_MIN;
     const tempMax = bounds.tempMax ?? TEMP_MAX;
     const params = { state: true, dimming: clampInt(state.brightness, dimMin, DIMMING_MAX) };
+    if (state.scene) {
+      params.sceneId = Number(state.scene.id);
+      if (state.scene.speed != null) params.speed = clampSpeed(state.scene.speed);
+      return params;
+    }
     if (state.mode === "white") {
       params.temp = clampInt(state.temp, tempMin, tempMax);
     } else if (whiteMix) {
@@ -243,8 +261,10 @@ var WizCore = (() => {
     if (Number.isFinite(dimMin) && dimMin > 0) bounds.dimMin = dimMin;
     return bounds;
   }
-  function describeDevice(modelConfig) {
-    if (!modelConfig || typeof modelConfig !== "object") return "";
+  function deviceCapabilities(modelConfig) {
+    if (!modelConfig || typeof modelConfig !== "object") {
+      return { rgb: false, tunableWhite: false, white: false };
+    }
     const { tempMin, tempMax } = deviceBoundsFromConfig(modelConfig);
     const pwm = Array.isArray(modelConfig.pwmRanges) ? modelConfig.pwmRanges : [];
     let channels = 0;
@@ -252,15 +272,22 @@ var WizCore = (() => {
       if (Number(pwm[i + 1]) > Number(pwm[i])) channels += 1;
     }
     const whiteChannels = Number(modelConfig.nowc);
-    const hasRgb = channels >= 3;
     const hasRange = Number.isFinite(tempMin) && Number.isFinite(tempMax) && tempMin < tempMax;
-    const hasTunableWhite = hasRange || whiteChannels >= 2;
-    const hasWhite = hasTunableWhite || Number.isFinite(tempMin) || whiteChannels >= 1;
+    const tunableWhite = hasRange || whiteChannels >= 2;
+    const white = tunableWhite || Number.isFinite(tempMin) || whiteChannels >= 1;
+    const caps = { rgb: channels >= 3, tunableWhite, white };
+    if (Number.isFinite(tempMin)) caps.tempMin = tempMin;
+    if (Number.isFinite(tempMax)) caps.tempMax = tempMax;
+    return caps;
+  }
+  function describeDevice(modelConfig) {
+    const { rgb, tunableWhite, white, tempMin, tempMax } = deviceCapabilities(modelConfig);
+    const hasRange = Number.isFinite(tempMin) && Number.isFinite(tempMax) && tempMin < tempMax;
     const parts = [];
-    if (hasRgb) parts.push("RGB");
-    if (hasTunableWhite) {
+    if (rgb) parts.push("RGB");
+    if (tunableWhite) {
       parts.push(hasRange ? `tunable white ${tempMin}\u2013${tempMax} K` : "tunable white");
-    } else if (hasWhite) {
+    } else if (white) {
       parts.push("white");
     }
     return parts.join(" + ");
@@ -284,11 +311,13 @@ var WizCore = (() => {
   }
   function applyPreset(state, preset) {
     const brightness = clampBrightness(preset.brightness ?? state.brightness);
+    const base = { ...state };
+    delete base.scene;
     if (preset.mode === "white") {
-      return { ...state, on: true, mode: "white", temp: clampTemp(preset.temp), brightness };
+      return { ...base, on: true, mode: "white", temp: clampTemp(preset.temp), brightness };
     }
     return {
-      ...state,
+      ...base,
       on: true,
       mode: "rgb",
       rgb: clampRgb([preset.r, preset.g, preset.b]),

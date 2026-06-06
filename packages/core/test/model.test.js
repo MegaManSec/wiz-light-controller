@@ -6,6 +6,7 @@ import {
   buildSetPilotParams,
   rgbToWhiteMixed,
   deviceBoundsFromConfig,
+  deviceCapabilities,
   describeDevice,
   dimToWarmCurveFromConfig,
   warmGlowKelvin,
@@ -409,6 +410,89 @@ describe('model: describeDevice', () => {
   it('returns empty when nothing is determinable', () => {
     assert.equal(describeDevice({}), '');
     assert.equal(describeDevice(null), '');
+  });
+});
+
+describe('model: deviceCapabilities', () => {
+  it('reads RGB + tunable white from an RGBWW strip', () => {
+    const caps = deviceCapabilities({
+      pwmRanges: [0, 1000, 0, 1000, 0, 1000, 0, 1000, 0, 1000],
+      nowc: 2,
+      cctRange: [2700, 2700, 6500, 6500],
+    });
+    assert.equal(caps.rgb, true);
+    assert.equal(caps.tunableWhite, true);
+    assert.equal(caps.white, true);
+    assert.deepEqual([caps.tempMin, caps.tempMax], [2700, 6500]);
+  });
+
+  it('reports white-only (no rgb) for a tunable-white bulb', () => {
+    const caps = deviceCapabilities({
+      pwmRanges: [0, 1000, 0, 1000],
+      nowc: 2,
+      cctRange: [2200, 6500],
+    });
+    assert.equal(caps.rgb, false);
+    assert.equal(caps.white, true);
+  });
+
+  it('is all-false when nothing is determinable', () => {
+    assert.deepEqual(deviceCapabilities({}), { rgb: false, tunableWhite: false, white: false });
+    assert.deepEqual(deviceCapabilities(null), { rgb: false, tunableWhite: false, white: false });
+  });
+});
+
+describe('model: dynamic scenes', () => {
+  it('parsePilot surfaces a running scene (id + clamped speed)', () => {
+    const s = parsePilot({ state: true, sceneId: 4, speed: 120, dimming: 80 });
+    assert.deepEqual(s.scene, { id: 4, speed: 120 });
+    assert.equal(s.brightness, 80);
+    assert.equal(s.on, true);
+  });
+
+  it('parsePilot omits scene when sceneId is 0 / absent', () => {
+    assert.equal('scene' in parsePilot({ state: true, sceneId: 0, r: 255, g: 0, b: 0 }), false);
+    assert.equal('scene' in parsePilot({ state: true, r: 1, g: 2, b: 3 }), false);
+  });
+
+  it('parsePilot keeps a scene without a reported speed', () => {
+    assert.deepEqual(parsePilot({ state: true, sceneId: 7 }).scene, { id: 7 });
+  });
+
+  it('buildSetPilotParams emits sceneId + speed + dimming for a scene', () => {
+    assert.deepEqual(
+      buildSetPilotParams({ on: true, brightness: 80, scene: { id: 4, speed: 120 } }),
+      {
+        state: true,
+        dimming: 80,
+        sceneId: 4,
+        speed: 120,
+      },
+    );
+  });
+
+  it('buildSetPilotParams omits speed when the scene has none', () => {
+    assert.deepEqual(buildSetPilotParams({ on: true, brightness: 100, scene: { id: 4 } }), {
+      state: true,
+      dimming: 100,
+      sceneId: 4,
+    });
+  });
+
+  it('buildSetPilotParams clamps an out-of-range scene speed', () => {
+    const p = buildSetPilotParams({ on: true, brightness: 100, scene: { id: 4, speed: 999 } });
+    assert.equal(p.speed, 200);
+  });
+
+  it('a scene still yields { state: false } when off', () => {
+    assert.deepEqual(buildSetPilotParams({ on: false, scene: { id: 4 } }), { state: false });
+  });
+
+  it('applyPreset clears an active scene (a preset is a static colour/white)', () => {
+    const next = applyPreset({ ...DEFAULT_STATE, scene: { id: 4 } }, DEFAULT_PRESETS.rgb.Red);
+    assert.equal('scene' in next, false);
+    assert.equal(next.mode, 'rgb');
+    assert.deepEqual(next.rgb, [255, 0, 0]);
   });
 });
 

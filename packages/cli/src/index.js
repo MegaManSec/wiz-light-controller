@@ -22,6 +22,7 @@ const OPTIONS = {
   version: { type: 'boolean', short: 'V' },
   json: { type: 'boolean' },
   brightness: { type: 'string' },
+  speed: { type: 'string' },
   timeout: { type: 'string' },
   attempts: { type: 'string' },
 };

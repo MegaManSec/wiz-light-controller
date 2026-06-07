@@ -404,6 +404,14 @@ final class AppState: ObservableObject {
   private static let maxSyncAttempts = 4
   /// Consecutive silent health pings (15 s apart) before declaring a drop (≈45 s).
   private static let maxHealthFailures = 3
+  /// `getPilot` probes per health check before a tick counts as silent. A lone
+  /// dropped datagram or a firmware micro-sleep shouldn't read as a failure, so a
+  /// probe retries (like `sync`'s connect and WizClient's 3× sends) before the
+  /// 15 s tick is allowed to add a strike toward `maxHealthFailures`.
+  private static let healthProbeAttempts = 3
+  /// Gap between those probes — long enough to let a micro-sleeping bulb wake,
+  /// short enough that a real drop still settles well within the 15 s cadence.
+  private static let healthProbeRetryMs = 150
 
   /// Query the bulb (`getPilot`) and fold the result into `state`, updating
   /// `connected`. Retries a few times on failure so a valid, reachable bulb
@@ -423,10 +431,12 @@ final class AppState: ObservableObject {
 
   /// Re-read a *connected* light's values (e.g. when the dropdown opens) without
   /// reconnecting a disconnected one — so opening the menu never overrides a
-  /// manual disconnect. No-op while disconnected.
+  /// manual disconnect. No-op while disconnected. Passes `monitorHealth: false` so
+  /// an off-cadence open only *reads* fresh values (and clears stale strikes on a
+  /// reply) — it can never itself disconnect you; only the 15 s poll drops the link.
   func refreshIfConnected() {
     guard connected else { return }
-    refreshSignal()
+    refreshSignal(monitorHealth: false)
   }
 
   /// Warm Glow is a local overlay on white mode (the temperature follows the
@@ -587,7 +597,7 @@ final class AppState: ObservableObject {
     timer.setEventHandler { [weak self] in
       guard let self = self, self.hasLight else { return }
       if self.connected {
-        self.refreshSignal()
+        self.refreshSignal(monitorHealth: true)
       } else if !self.manuallyDisconnected {
         self.sync()
       }
@@ -599,14 +609,29 @@ final class AppState: ObservableObject {
   /// Health check + state refresh for the connected poll. A reply refreshes the
   /// signal, resets the failure count, and — unless the user just made a local
   /// edit — folds the bulb's reported state back in, so changes made elsewhere
-  /// (e.g. the phone app) show up here too. `maxHealthFailures` consecutive
-  /// silences flip us to disconnected, tolerating a dropped datagram or
-  /// micro-sleep without flapping.
-  private func refreshSignal() {
+  /// (e.g. the phone app) show up here too. Each call probes `getPilot` up to
+  /// `healthProbeAttempts` times so a single dropped datagram or micro-sleep isn't
+  /// mistaken for silence; only when `monitorHealth` is set (the 15 s timer) does a
+  /// fully silent probe add a strike, and `maxHealthFailures` consecutive silent
+  /// ticks then flip us to disconnected.
+  private func refreshSignal(monitorHealth: Bool) {
     guard let client = client else { return }
     let host = selectedIp
+    // Read the actor-isolated tunables into locals up front (like `host`) so the
+    // off-main probe closure can use them.
+    let (attempts, retryMs) = (Self.healthProbeAttempts, Self.healthProbeRetryMs)
     DispatchQueue.global(qos: .utility).async { [weak self] in
-      let result = client.getPilot(host: host)
+      // Probe a few times before treating the bulb as silent — riding out a lone
+      // dropped datagram the way `sync` and WizClient's repeated sends do, so a
+      // healthy-but-blippy bulb doesn't flap the connection.
+      var result: [String: Any]?
+      for attempt in 0..<attempts {
+        result = client.getPilot(host: host)
+        if result != nil { break }
+        if attempt < attempts - 1 {
+          Thread.sleep(forTimeInterval: Double(retryMs) / 1000)
+        }
+      }
       DispatchQueue.main.async {
         guard let self = self, self.selectedIp == host, self.connected else { return }
         if let result = result {
@@ -634,7 +659,7 @@ final class AppState: ObservableObject {
             if next.on, next.brightness > 0 { self.lastBrightness = next.brightness }
           }
           self.bump()
-        } else {
+        } else if monitorHealth {
           self.healthFailures += 1
           if self.healthFailures >= Self.maxHealthFailures {
             self.healthFailures = 0

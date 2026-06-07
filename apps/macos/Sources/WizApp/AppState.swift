@@ -40,8 +40,45 @@ final class AppState: ObservableObject {
   /// Persisted UI settings (accent / highlight / auto-sync).
   @Published var settings: Stores.Settings = .defaults
 
-  /// Last reachability result from a `getPilot`. Drives the status dot/text.
-  @Published var connected: Bool = false
+  /// Connection lifecycle for the selected light — the single source of truth for
+  /// the status dot/text in both the controls window and the menu-bar popover.
+  /// `connected` is *derived* from this (below) so the boolean and the displayed
+  /// phase can never disagree. Transitions live in `sync`/`syncAttempt`,
+  /// `reconnect`, `disconnect`, `selectLight`, and the health poll.
+  enum ConnectionStatus: Equatable {
+    /// No light selected (no IP).
+    case noLight
+    /// A connect/reconnect attempt is in flight (getPilot retrying).
+    case connecting
+    /// Last getPilot succeeded — the light is reachable.
+    case connected
+    /// Idle or dropped with nothing to report: selected-but-not-connected, a
+    /// manual disconnect, or a transient health drop the poll will quietly retry.
+    case disconnected
+    /// A connect attempt gave up; carries a short reason for the UI to show.
+    case error(String)
+  }
+  @Published private(set) var status: ConnectionStatus = .noLight
+
+  /// True only while the light is reachable. Derived from `status`, so it can
+  /// never contradict the phase the UI is showing.
+  var connected: Bool { status == .connected }
+  /// A connect/reconnect is in flight (drives the "Connecting…" spinner/label).
+  var isConnecting: Bool { status == .connecting }
+  /// The current phase is a failure (drives red error styling).
+  var statusIsError: Bool { if case .error = status { return true } else { return false } }
+
+  /// Short status text shared by the controls-window dot and the popover, e.g.
+  /// "Connecting…", "Connected", or the error reason itself.
+  var statusLabel: String {
+    switch status {
+    case .noLight: return "No light"
+    case .connecting: return "Connecting…"
+    case .connected: return "Connected"
+    case .disconnected: return "Disconnected"
+    case .error(let message): return message
+    }
+  }
 
   /// Read-only device info for Settings. `rssi` refreshes while connected; the
   /// rest (`mac` / `moduleName` / `firmware`) are read once per host on connect.
@@ -355,7 +392,6 @@ final class AppState: ObservableObject {
     // light's until we re-confirm/re-read them on connect, so its state can't be
     // shown (or sent) under the newly selected light during the brief sync.
     if configHost != ip {
-      connected = false
       negotiatedTempRange = nil
       negotiatedDimMin = nil
       deviceInfo = DeviceInfo()
@@ -371,12 +407,12 @@ final class AppState: ObservableObject {
       bump()
       // Selecting a light attempts to connect (and reflect its state), so a valid,
       // reachable IP turns green without a manual sync.
-      if hasLight { sync() }
+      if hasLight { sync() } else { status = .noLight; bump() }
     } else {
       // Selected without connecting — leave it disconnected until the user
       // explicitly connects (Controls → Connect), and don't auto-reconnect.
       manuallyDisconnected = true
-      connected = false
+      status = hasLight ? .disconnected : .noLight
       bump()
     }
   }
@@ -422,10 +458,13 @@ final class AppState: ObservableObject {
     // Any explicit sync is an intent to connect — clear a manual disconnect.
     manuallyDisconnected = false
     guard hasLight else {
-      connected = false
+      status = .noLight
       bump()
       return
     }
+    // Show "Connecting…" right away; syncAttempt resolves to .connected or .error.
+    status = .connecting
+    bump()
     syncAttempt(host: selectedIp, attempt: 0)
   }
 
@@ -476,7 +515,7 @@ final class AppState: ObservableObject {
         // Drop a stale result if the user switched lights mid-flight.
         guard let self = self, self.selectedIp == host else { return }
         if let result = result, let parsed = self.core.parsePilot(result) {
-          self.connected = true
+          self.status = .connected
           self.healthFailures = 0
           // Preserve the user's last RGB if the bulb reports white mode (so
           // flipping back to RGB restores their colour rather than white).
@@ -498,7 +537,7 @@ final class AppState: ObservableObject {
             self?.syncAttempt(host: host, attempt: attempt + 1)
           }
         } else {
-          self.connected = false
+          self.status = .error("Couldn't reach \(self.displayName)")
           self.bump()
         }
       }
@@ -566,11 +605,11 @@ final class AppState: ObservableObject {
   /// stuck "Disconnected" state and refreshes the local controls on reconnect.
   func reconnect() {
     guard hasLight else {
-      connected = false
+      status = .noLight
       bump()
       return
     }
-    connected = false
+    status = .connecting
     client = WizClient(host: selectedIp)
     bump()
     sync()
@@ -581,7 +620,7 @@ final class AppState: ObservableObject {
   func disconnect() {
     guard hasLight else { return }
     manuallyDisconnected = true
-    connected = false
+    status = .disconnected
     healthFailures = 0
     bump()
   }
@@ -663,7 +702,7 @@ final class AppState: ObservableObject {
           self.healthFailures += 1
           if self.healthFailures >= Self.maxHealthFailures {
             self.healthFailures = 0
-            self.connected = false
+            self.status = .disconnected
             self.bump()
           }
         }

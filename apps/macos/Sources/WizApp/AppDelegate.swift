@@ -180,8 +180,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
   private func statusTooltip() -> String {
     guard appState.hasLight else { return "WiZ Light Controller — No light selected" }
-    let power = appState.connected ? (appState.state.on ? "On" : "Off") : "Unreachable"
-    return "\(appState.displayName) — \(power)"
+    let state: String
+    switch appState.status {
+    case .connected: state = appState.state.on ? "On" : "Off"
+    case .connecting: state = "Connecting…"
+    case .error(let message): state = message
+    case .disconnected, .noLight: state = "Unreachable"
+    }
+    return "\(appState.displayName) — \(state)"
   }
 
   /// Observe app state so the status icon tracks power/connection changes.

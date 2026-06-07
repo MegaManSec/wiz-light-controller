@@ -381,7 +381,7 @@ var WizCore = (() => {
     20: "Spring",
     21: "Summer",
     22: "Fall",
-    23: "Deepdive",
+    23: "Deep-dive",
     24: "Jungle",
     25: "Mojito",
     26: "Club",
@@ -390,7 +390,11 @@ var WizCore = (() => {
     29: "Candlelight",
     30: "Golden White",
     31: "Pulse",
-    32: "Steampunk"
+    32: "Steampunk",
+    33: "Diwali",
+    34: "White",
+    35: "Alarm",
+    36: "Snowy Sky"
   });
   var SCENE_HINTS = Object.freeze({
     1: "Rolling blues and teals",
@@ -424,9 +428,13 @@ var WizCore = (() => {
     29: "Warm candle flicker",
     30: "Warm golden white",
     31: "Single colour, pulsing",
-    32: "Warm amber and brass"
+    32: "Warm amber and brass",
+    33: "Festive golds and bright colour",
+    34: "Plain bright white",
+    35: "Bright, alerting light",
+    36: "Cool wintry blues and whites"
   });
-  var WHITE_SCENE_IDS = /* @__PURE__ */ new Set([6, 9, 10, 11, 12, 13, 14, 29, 30]);
+  var WHITE_SCENE_IDS = /* @__PURE__ */ new Set([6, 9, 10, 11, 12, 13, 14, 29, 30, 34]);
   function sceneName(id) {
     return SCENES[id] ?? null;
   }

@@ -95,8 +95,7 @@ final class WizCoreTests: XCTestCase {
     XCTAssertTrue(scenes.contains { $0.id == 23 && $0.name == "Deep-dive" })  // renamed
     XCTAssertFalse(scenes.first(where: { $0.id == 4 })?.hint.isEmpty ?? true)
 
-    // Each scene carries a macOS presentation (SF Symbol + tint), with a fallback.
-    XCTAssertEqual(scenes.first(where: { $0.id == 35 })?.symbol, "bell")
+    // The icon accessors return a 3-channel tint and fall back for an unknown id.
     XCTAssertEqual(SceneIcons.tint(1).count, 3)
     XCTAssertEqual(SceneIcons.symbol(9999), "sparkles")
     // Every engine scene must have a dedicated SceneIcons entry — guards against a

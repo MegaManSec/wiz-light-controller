@@ -147,7 +147,7 @@ struct ConnectionBar: View {
       }
       .labelsHidden()
       .frame(maxWidth: 200)
-      .disabled(app.connected)
+      .disabled(app.connected || app.isConnecting)
       .help("Choose a saved light, then Connect.")
       .overlay {
         // A disabled control doesn't surface its own tooltip, so when connected
@@ -169,9 +169,9 @@ struct ConnectionBar: View {
         Button {
           app.reconnect()
         } label: {
-          Label("Connect", systemImage: "link")
+          Label(app.isConnecting ? "Connecting…" : "Connect", systemImage: "link")
         }
-        .disabled(!app.hasLight)
+        .disabled(!app.hasLight || app.isConnecting)
         .help("Connect to the selected light.")
       }
 
@@ -216,12 +216,32 @@ struct ConnectionBar: View {
 
   private var statusDot: some View {
     HStack(spacing: 6) {
-      Circle()
-        .fill(app.connected ? Color.green : Color.red)
-        .frame(width: 10, height: 10)
-      Text(app.connected ? "Connected" : "Disconnected")
+      if app.isConnecting {
+        ProgressView()
+          .controlSize(.small)
+          .scaleEffect(0.6)
+          .frame(width: 12, height: 12)
+      } else {
+        Circle()
+          .fill(statusColor)
+          .frame(width: 10, height: 10)
+      }
+      Text(app.statusLabel)
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(app.statusIsError ? Color.red : Color.secondary)
+        .lineLimit(1)
+        .truncationMode(.tail)
+    }
+    .help(app.statusLabel)  // full text on hover when an error message truncates
+  }
+
+  /// Dot colour for the resolved (non-connecting) states.
+  private var statusColor: Color {
+    switch app.status {
+    case .connected: return .green
+    case .error, .disconnected: return .red
+    case .connecting: return .orange  // a spinner shows instead; sensible fallback
+    case .noLight: return .gray
     }
   }
 }

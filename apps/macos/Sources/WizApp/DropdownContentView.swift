@@ -360,7 +360,21 @@ final class DropdownContentView: NSView {
   /// only tear down and rebuild when the shape actually changes.
   private func currentStructureKey() -> String {
     let update = UpdateChecker.shared.updateAvailable && UpdateChecker.shared.latestVersion != nil
-    return "\(app.connected)|\(app.hasLight)|\(app.colorMode.rawValue)|\(app.supportsScenes)|\(sceneListExpanded)|\(app.state.scene?.id ?? 0)|\(update)"
+    return "\(statusPhaseKey)|\(app.hasLight)|\(app.colorMode.rawValue)|\(app.supportsScenes)|\(sceneListExpanded)|\(app.state.scene?.id ?? 0)|\(update)"
+  }
+
+  /// Coarse connection phase for the structure key: the disconnected panel renders
+  /// differently per phase (spinner / error message / Connect button), so a phase
+  /// change must rebuild it. The error *text* is deliberately excluded — it's read
+  /// live in `makeDisconnected`, so only real phase flips trigger a rebuild.
+  private var statusPhaseKey: String {
+    switch app.status {
+    case .noLight: return "noLight"
+    case .connecting: return "connecting"
+    case .connected: return "connected"
+    case .disconnected: return "disconnected"
+    case .error: return "error"
+    }
   }
 
   private func scheduleSync() {
@@ -755,13 +769,7 @@ final class DropdownContentView: NSView {
     col.alignment = .leading
     col.spacing = 8
 
-    if app.hasLight {
-      let button = NSButton(
-        title: "Connect to \(app.displayName)", target: self, action: #selector(connect))
-      button.bezelStyle = .rounded
-      button.controlSize = .large
-      col.addArrangedSubview(fullWidth(button))
-    } else {
+    guard app.hasLight else {
       let title = NSTextField(labelWithString: "No lights set up yet")
       title.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
       let caption = NSTextField(
@@ -775,7 +783,44 @@ final class DropdownContentView: NSView {
       col.addArrangedSubview(title)
       col.addArrangedSubview(fullWidth(caption))
       col.addArrangedSubview(fullWidth(button))
+      return fullWidth(col)
     }
+
+    // A saved light is selected — show the live connection phase.
+    if app.isConnecting {
+      let spinner = NSProgressIndicator()
+      spinner.style = .spinning
+      spinner.controlSize = .small
+      spinner.startAnimation(nil)
+      spinner.translatesAutoresizingMaskIntoConstraints = false
+      spinner.widthAnchor.constraint(equalToConstant: 16).isActive = true
+      spinner.heightAnchor.constraint(equalToConstant: 16).isActive = true
+      let label = NSTextField(labelWithString: "Connecting to \(app.displayName)…")
+      label.font = .systemFont(ofSize: NSFont.systemFontSize)
+      label.textColor = .secondaryLabelColor
+      label.lineBreakMode = .byTruncatingTail
+      let row = NSStackView(views: [spinner, label])
+      row.orientation = .horizontal
+      row.spacing = 8
+      row.alignment = .centerY
+      col.addArrangedSubview(fullWidth(row))
+      return fullWidth(col)
+    }
+
+    // On a failed attempt, lead with the reason (in red) above the Connect button.
+    if case .error(let message) = app.status {
+      let caption = NSTextField(wrappingLabelWithString: message)
+      caption.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+      caption.textColor = .systemRed
+      caption.preferredMaxLayoutWidth = Self.contentWidth
+      col.addArrangedSubview(fullWidth(caption))
+    }
+
+    let button = NSButton(
+      title: "Connect to \(app.displayName)", target: self, action: #selector(connect))
+    button.bezelStyle = .rounded
+    button.controlSize = .large
+    col.addArrangedSubview(fullWidth(button))
     return fullWidth(col)
   }
 
@@ -809,9 +854,12 @@ final class DropdownContentView: NSView {
   // MARK: - Derived values
 
   private var headerText: String {
-    if app.connected { return "Device: \(app.displayName)" }
-    if app.hasLight { return "Not connected" }
-    return "No light selected"
+    switch app.status {
+    case .connected: return "Device: \(app.displayName)"
+    case .connecting: return app.hasLight ? "Connecting to \(app.displayName)…" : "Connecting…"
+    case .error, .disconnected: return app.hasLight ? "Not connected" : "No light selected"
+    case .noLight: return "No light selected"
+    }
   }
 
   /// Hover hint for the device name — the full (untruncated) name, then IP +

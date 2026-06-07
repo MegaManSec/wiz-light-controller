@@ -58,20 +58,28 @@ private struct SceneChip: View {
     Button {
       app.applyScene(scene.id)
     } label: {
-      Text(scene.name)
-        .font(.caption)
-        .lineLimit(1)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
-        .overlay(
-          RoundedRectangle(cornerRadius: 8)
-            .strokeBorder(active ? Color.accentColor : .clear, lineWidth: 2))
-        .contentShape(Rectangle())
-        .background(ToolTip(text: tooltip))
+      VStack(spacing: 6) {
+        Image(systemName: scene.symbol)
+          .font(.system(size: 20))
+          .frame(height: 22)
+        Text(scene.name)
+          .font(.caption)
+          .lineLimit(1)
+      }
+      .frame(maxWidth: .infinity)
+      .padding(.vertical, 10)
+      .background(RoundedRectangle(cornerRadius: 8).fill(tint.opacity(0.22)))
+      .overlay(
+        RoundedRectangle(cornerRadius: 8)
+          .strokeBorder(active ? Color.accentColor : .clear, lineWidth: 2))
+      .contentShape(Rectangle())
+      .background(ToolTip(text: tooltip))
     }
     .buttonStyle(.plain)
   }
+
+  /// Soft per-scene tile tint (the chosen "coloured tiles" look).
+  private var tint: Color { Color(rgb: scene.tint) }
 
   /// Tooltip: the scene name plus its (approximate) colour/effect hint.
   private var tooltip: String { scene.hint.isEmpty ? scene.name : "\(scene.name) — \(scene.hint)" }

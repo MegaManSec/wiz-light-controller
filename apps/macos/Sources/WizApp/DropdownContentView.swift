@@ -319,7 +319,7 @@ final class DropdownContentView: NSView {
     app.supportsScenes ? AppState.ColorMode.popoverModes + [.scene] : AppState.ColorMode.popoverModes
   }
 
-  private static let panelWidth: CGFloat = 320  // wide enough for 4 full mode-picker segments
+  private static let panelWidth: CGFloat = 356  // fits switch + 4 full mode segments (incl. "Warm Glow") + insets
   private static let contentWidth: CGFloat = panelWidth - 28  // 14pt insets each side
 
   init(app: AppState, onOpenControls: @escaping () -> Void, onQuit: @escaping () -> Void) {
@@ -696,22 +696,41 @@ final class DropdownContentView: NSView {
     }
     tap.toolTip = scene.hint.isEmpty ? scene.name : "\(scene.name) — \(scene.hint)"
     tap.layer?.cornerRadius = 6
-    tap.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+    // Soft per-scene tint behind the glyph (the "coloured tiles" look).
+    tap.layer?.backgroundColor = Self.nsColor(scene.tint).withAlphaComponent(0.22).cgColor
     if app.state.scene?.id == scene.id {
       tap.layer?.borderColor = NSColor.controlAccentColor.cgColor
       tap.layer?.borderWidth = 2
     }
+
+    let icon = NSImageView()
+    icon.image = NSImage(systemSymbolName: scene.symbol, accessibilityDescription: scene.name)
+    icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
+    icon.contentTintColor = .labelColor
+    icon.imageScaling = .scaleProportionallyDown  // tall-bbox symbols scale into the fixed 18pt height
+    icon.translatesAutoresizingMaskIntoConstraints = false
+
     let label = NSTextField(labelWithString: scene.name)
     label.font = .systemFont(ofSize: 11)
     label.alignment = .center
     label.lineBreakMode = .byTruncatingTail
     label.translatesAutoresizingMaskIntoConstraints = false
+
+    tap.addSubview(icon)
     tap.addSubview(label)
-    tap.heightAnchor.constraint(equalToConstant: 26).isActive = true
+    // Equal top/bottom insets by construction: the icon's top sits 8 below the chip
+    // top, and the text *baseline* 8 above the chip bottom. Pinning the baseline (not
+    // the label frame) ignores the line box's descender padding, so the gap above the
+    // icon and the gap below the visible text are both 8 — independent of how tall a
+    // given SF Symbol's bounding box is. The fixed 18pt icon height keeps chips uniform.
+    tap.heightAnchor.constraint(equalToConstant: 50).isActive = true
     NSLayoutConstraint.activate([
+      icon.heightAnchor.constraint(equalToConstant: 18),
+      icon.topAnchor.constraint(equalTo: tap.topAnchor, constant: 8),
+      icon.centerXAnchor.constraint(equalTo: tap.centerXAnchor),
+      label.lastBaselineAnchor.constraint(equalTo: tap.bottomAnchor, constant: -8),
       label.leadingAnchor.constraint(equalTo: tap.leadingAnchor, constant: 6),
       label.trailingAnchor.constraint(equalTo: tap.trailingAnchor, constant: -6),
-      label.centerYAnchor.constraint(equalTo: tap.centerYAnchor),
     ])
     return tap
   }

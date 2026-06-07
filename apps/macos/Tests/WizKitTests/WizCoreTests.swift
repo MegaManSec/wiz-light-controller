@@ -89,9 +89,25 @@ final class WizCoreTests: XCTestCase {
     ]
     XCTAssertTrue(core.deviceCapabilities(rgbModel).rgb)
     let scenes = core.scenesForDevice(rgbModel)
-    XCTAssertEqual(scenes.count, 32)
+    XCTAssertEqual(scenes.count, 36)
     XCTAssertTrue(scenes.contains { $0.id == 4 && $0.name == "Party" })
+    XCTAssertTrue(scenes.contains { $0.id == 35 && $0.name == "Alarm" })  // newer scene (was missing)
+    XCTAssertTrue(scenes.contains { $0.id == 23 && $0.name == "Deep-dive" })  // renamed
     XCTAssertFalse(scenes.first(where: { $0.id == 4 })?.hint.isEmpty ?? true)
+
+    // Each scene carries a macOS presentation (SF Symbol + tint), with a fallback.
+    XCTAssertEqual(scenes.first(where: { $0.id == 35 })?.symbol, "bell")
+    XCTAssertEqual(SceneIcons.tint(1).count, 3)
+    XCTAssertEqual(SceneIcons.symbol(9999), "sparkles")
+    // Every engine scene must have a dedicated SceneIcons entry — guards against a
+    // scene added to the catalogue but forgotten here (it would silently fall back).
+    // Detected via the tint: no scene uses the fallback grey, whereas the fallback
+    // symbol "sparkles" can't be used as a sentinel (Diwali legitimately uses it).
+    // (This can't verify a symbol exists on the macOS 13 floor — that's manual.)
+    for s in scenes {
+      XCTAssertNotEqual(
+        SceneIcons.tint(s.id), [150, 150, 150], "scene \(s.id) (\(s.name)) missing from SceneIcons")
+    }
 
     // A scene round-trips through the wire format and back.
     let state = LightState(

@@ -10,13 +10,17 @@ import {
 } from '../src/scenes.js';
 
 describe('scenes: SCENES table', () => {
-  it('is the 32 well-known named scenes', () => {
-    assert.equal(Object.keys(SCENES).length, 32);
+  it('is the 36 well-known named scenes', () => {
+    assert.equal(Object.keys(SCENES).length, 36);
     assert.equal(SCENES[1], 'Ocean');
     assert.equal(SCENES[4], 'Party');
     assert.equal(SCENES[26], 'Club');
     assert.equal(SCENES[31], 'Pulse');
     assert.equal(SCENES[32], 'Steampunk');
+    assert.equal(SCENES[33], 'Diwali');
+    assert.equal(SCENES[34], 'White');
+    assert.equal(SCENES[35], 'Alarm');
+    assert.equal(SCENES[36], 'Snowy Sky');
   });
 
   it('is frozen', () => {
@@ -27,6 +31,7 @@ describe('scenes: SCENES table', () => {
 describe('scenes: sceneName', () => {
   it('maps an id to its name, null for unknown / "no scene" (0)', () => {
     assert.equal(sceneName(4), 'Party');
+    assert.equal(sceneName(35), 'Alarm');
     assert.equal(sceneName(0), null);
     assert.equal(sceneName(99), null);
   });
@@ -42,6 +47,7 @@ describe('scenes: findScene', () => {
   it('resolves a name case-insensitively, including multi-word', () => {
     assert.deepEqual(findScene('party'), { id: 4, name: 'Party' });
     assert.deepEqual(findScene('PASTEL COLORS'), { id: 8, name: 'Pastel Colors' });
+    assert.deepEqual(findScene('deep-dive'), { id: 23, name: 'Deep-dive' }); // hyphen + case
   });
 
   it('returns null for unknown ids/names and unusable input', () => {
@@ -59,20 +65,22 @@ describe('scenes: scenesForDevice', () => {
   const rgb = { pwmRanges: [0, 1000, 0, 1000, 0, 1000, 0, 1000, 0, 1000], nowc: 2 };
   const whiteOnly = { pwmRanges: [0, 1000, 0, 1000], nowc: 2, cctRange: [2700, 2700, 6500, 6500] };
 
-  it('returns all 32 for an RGB bulb', () => {
-    assert.equal(scenesForDevice(rgb).length, 32);
+  it('returns all 36 for an RGB bulb', () => {
+    assert.equal(scenesForDevice(rgb).length, 36);
   });
 
   it('returns only the white-capable subset for a white-only bulb', () => {
     const ids = scenesForDevice(whiteOnly).map((s) => s.id);
     assert.ok(ids.includes(11), 'keeps Warm White'); // white scene
+    assert.ok(ids.includes(34), 'keeps White'); // white scene
     assert.ok(!ids.includes(4), 'drops Party'); // colour scene
-    assert.ok(ids.length > 0 && ids.length < 32);
+    assert.ok(!ids.includes(35), 'drops Alarm'); // colour scene
+    assert.ok(ids.length > 0 && ids.length < 36);
   });
 
-  it('stays permissive (all 32) when capabilities are unknown', () => {
-    assert.equal(scenesForDevice({}).length, 32);
-    assert.equal(scenesForDevice(null).length, 32);
+  it('stays permissive (all 36) when capabilities are unknown', () => {
+    assert.equal(scenesForDevice({}).length, 36);
+    assert.equal(scenesForDevice(null).length, 36);
   });
 });
 

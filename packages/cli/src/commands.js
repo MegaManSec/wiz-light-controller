@@ -300,7 +300,7 @@ async function liveStateOrDefault(ip) {
 }
 
 async function cmdScenes({ positionals, values, stores }) {
-  // scenesForDevice(null) returns all 32, so an unreachable/omitted bulb still
+  // scenesForDevice(null) returns every scene, so an unreachable/omitted bulb still
   // lists them; a reachable one narrows to what it can actually show.
   const ip = positionals[0] ?? (await stores.lastState.loadIp());
   const model = ip && isValidIp(ip) ? await getModelConfig(ip) : null;

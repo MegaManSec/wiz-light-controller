@@ -1,8 +1,9 @@
 // Dynamic-scene catalogue. WiZ bulbs run these animations in firmware; `getPilot`
 // reports only the numeric `sceneId` — never a name — so the id↔name mapping is a
 // fixed convention (matching pywizlight / the official app), not device-reported.
-// IDs 1–32 are the validated, named set; the firmware accepts higher numbers but
-// they aren't confirmed scenes, so we don't list them. No Node built-ins.
+// IDs 1–36 are the validated, named set (confirmed against pywizlight and a live
+// bulb). The firmware also accepts 1000 ("Rhythm", a scheduled circadian mode),
+// but it isn't a normal animation, so we don't list it. No Node built-ins.
 
 import { deviceCapabilities } from './model.js';
 
@@ -30,7 +31,7 @@ export const SCENES = Object.freeze({
   20: 'Spring',
   21: 'Summer',
   22: 'Fall',
-  23: 'Deepdive',
+  23: 'Deep-dive',
   24: 'Jungle',
   25: 'Mojito',
   26: 'Club',
@@ -40,6 +41,10 @@ export const SCENES = Object.freeze({
   30: 'Golden White',
   31: 'Pulse',
   32: 'Steampunk',
+  33: 'Diwali',
+  34: 'White',
+  35: 'Alarm',
+  36: 'Snowy Sky',
 });
 
 /**
@@ -82,10 +87,14 @@ export const SCENE_HINTS = Object.freeze({
   30: 'Warm golden white',
   31: 'Single colour, pulsing',
   32: 'Warm amber and brass',
+  33: 'Festive golds and bright colour',
+  34: 'Plain bright white',
+  35: 'Bright, alerting light',
+  36: 'Cool wintry blues and whites',
 });
 
 /** Scenes that render on a white-only (no colour LEDs) bulb. Everything else needs RGB. */
-const WHITE_SCENE_IDS = new Set([6, 9, 10, 11, 12, 13, 14, 29, 30]);
+const WHITE_SCENE_IDS = new Set([6, 9, 10, 11, 12, 13, 14, 29, 30, 34]);
 
 /** Scene id → name, or `null` for an unknown / out-of-range id (incl. 0 = "no scene"). */
 export function sceneName(id) {

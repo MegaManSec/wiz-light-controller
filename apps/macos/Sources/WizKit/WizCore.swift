@@ -192,9 +192,12 @@ public final class WizCore {
   }
 
   public var tempRange: ClosedRange<Int> {
+    // TEMP_MIN/MAX live in the engine (color.js) — the single source of truth, and
+    // are always defined (init() fatalErrors if the bundle failed to load), so use
+    // them directly rather than re-hardcoding the 2200/6500 literals here.
     let lo = Int(core.objectForKeyedSubscript("TEMP_MIN").toInt32())
     let hi = Int(core.objectForKeyedSubscript("TEMP_MAX").toInt32())
-    return (lo == 0 ? 2200 : lo)...(hi == 0 ? 6500 : hi)
+    return lo...hi
   }
 
   /// The seeded presets, grouped `rgb` / `white`, preserving insertion order.

@@ -54,9 +54,10 @@ struct ControllerView: View {
     }
     .frame(minWidth: 600, minHeight: 500)
     .onAppear {
-      // Refresh a connected light's values, but never reconnect a manually
-      // disconnected one (matches the menu-bar popover's refreshIfConnected).
-      if app.settings.autoSync, app.hasLight { app.refreshIfConnected() }
+      // Refresh a connected light's values (or, mid auto-reconnect, bring the next
+      // attempt forward), but never reconnect a manually disconnected one — matches
+      // the menu-bar popover's refreshOnOpen.
+      if app.settings.autoSync { app.refreshOnOpen() }
     }
   }
 

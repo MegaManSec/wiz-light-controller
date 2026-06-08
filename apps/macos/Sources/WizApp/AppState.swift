@@ -493,14 +493,30 @@ final class AppState: ObservableObject {
     syncAttempt(host: selectedIp, attempt: 0)
   }
 
-  /// Re-read a *connected* light's values (e.g. when the dropdown opens) without
-  /// reconnecting a disconnected one — so opening the menu never overrides a
-  /// manual disconnect. No-op while disconnected. Passes `monitorHealth: false` so
-  /// an off-cadence open only *reads* fresh values (and clears stale strikes on a
-  /// reply) — it can never itself disconnect you; only the 15 s poll drops the link.
-  func refreshIfConnected() {
-    guard connected else { return }
-    refreshSignal(monitorHealth: false)
+  /// Called when a UI surface opens (the menu-bar dropdown, or the controls
+  /// window under auto-sync). Two cases:
+  ///
+  /// - **Connected:** re-read the bulb's values via `monitorHealth: false`, so an
+  ///   off-cadence open only *reads* fresh values (and clears stale strikes on a
+  ///   reply) — it can never itself disconnect you; only the 15 s poll drops the
+  ///   link.
+  /// - **Mid auto-reconnect** (dropped but not *manually* disconnected): treat the
+  ///   open as a fresh chance to reach the bulb — reset the backoff and pull the
+  ///   next attempt forward (~0.5 s), so the user doesn't sit watching a backoff
+  ///   that may have grown to minutes. Same bring-forward as `handlePathChange`;
+  ///   `pollTick` owns the connect guards and won't stack onto an in-flight
+  ///   attempt, so we just reschedule.
+  ///
+  /// A deliberate disconnect (and a no-light state) is left alone, so opening the
+  /// menu never overrides it — the same invariant the poll and network-change
+  /// paths honour.
+  func refreshOnOpen() {
+    if connected {
+      refreshSignal(monitorHealth: false)
+    } else if hasLight, !manuallyDisconnected {
+      resetReconnectBackoff()
+      scheduleNextPoll(after: 0.5)
+    }
   }
 
   /// Warm Glow is a local overlay on white mode (the temperature follows the

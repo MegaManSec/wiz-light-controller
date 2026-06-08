@@ -43,6 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     setupActivationPolicyTracking()
     setupStrayWindowGuard()
     observeState()
+    observePowerEvents()
+    // Opt out of sudden termination so logout/shutdown routes through the quit
+    // AppleEvent → applicationShouldTerminate (which `isSystemInitiatedQuit`
+    // reads) rather than a SIGKILL, giving the shutdown power-off a chance to
+    // run. Harmless when the feature's off — we return `.terminateNow` at once.
+    ProcessInfo.processInfo.disableSuddenTermination()
 
     // Best-effort, silent, throttled to once per 24h. Drives the "Update
     // Available" item in the menu.
@@ -71,7 +77,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     _ sender: NSApplication
   ) -> NSApplication.TerminateReply {
     if quitFromStatusBarMenu { return .terminateNow }
-    if Self.isSystemInitiatedQuit() { return .terminateNow }
+    if Self.isSystemInitiatedQuit() {
+      // Logout / restart / shutdown — turn the light off first if opted in.
+      appState.powerOffForShutdown()
+      return .terminateNow
+    }
     for window in NSApp.windows where window.isVisible && window.level == .normal {
       window.close()
     }
@@ -94,6 +104,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       || reason == kAEShutDown
   }
 
+  // MARK: - System power events
+
+  /// Turn the light off before the Mac sleeps (gated by `AppState`'s setting).
+  /// Registered on `NSWorkspace`'s *own* notification center, which posts
+  /// `willSleepNotification` on the main thread synchronously during the sleep
+  /// transition — so this selector handler runs inline and the off datagrams
+  /// egress while Wi-Fi is still up. (A block dispatched to a queue could race
+  /// the actual sleep, and on macOS 13 there's no `MainActor.assumeIsolated` to
+  /// bridge one back synchronously.) Shutdown is handled in
+  /// `applicationShouldTerminate` instead — see `AppState.powerOffForShutdown`.
+  private func observePowerEvents() {
+    NSWorkspace.shared.notificationCenter.addObserver(
+      self, selector: #selector(systemWillSleep),
+      name: NSWorkspace.willSleepNotification, object: nil)
+  }
+
+  @objc private func systemWillSleep(_ notification: Notification) {
+    appState.powerOffForSleep()
+  }
+
   deinit {
     if let token = windowCloseObserver {
       NotificationCenter.default.removeObserver(token)
@@ -101,6 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     if let token = strayWindowObserver {
       NotificationCenter.default.removeObserver(token)
     }
+    NSWorkspace.shared.notificationCenter.removeObserver(self)
   }
 
   // MARK: - Stray-window guard

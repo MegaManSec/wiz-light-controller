@@ -115,13 +115,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   /// bridge one back synchronously.) Shutdown is handled in
   /// `applicationShouldTerminate` instead — see `AppState.powerOffForShutdown`.
   private func observePowerEvents() {
-    NSWorkspace.shared.notificationCenter.addObserver(
+    let center = NSWorkspace.shared.notificationCenter
+    center.addObserver(
       self, selector: #selector(systemWillSleep),
       name: NSWorkspace.willSleepNotification, object: nil)
+    // Wake is the mirror of sleep: bring the light back on if the user opted into
+    // restore. Unlike the off (which must egress before Wi-Fi drops, hence the
+    // synchronous handler), the on can be patient — `AppState` re-probes and turns
+    // the light on once the bulb is reachable again.
+    center.addObserver(
+      self, selector: #selector(systemDidWake),
+      name: NSWorkspace.didWakeNotification, object: nil)
   }
 
   @objc private func systemWillSleep(_ notification: Notification) {
     appState.powerOffForSleep()
+  }
+
+  @objc private func systemDidWake(_ notification: Notification) {
+    appState.lightShouldRestoreOnWake()
   }
 
   deinit {

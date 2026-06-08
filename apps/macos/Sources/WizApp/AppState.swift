@@ -754,7 +754,7 @@ final class AppState: ObservableObject {
   private func startNetworkMonitor() {
     pathMonitor.pathUpdateHandler = { [weak self] path in
       // NWPathMonitor calls back on its own queue; AppState is main-actor isolated.
-      Task { @MainActor in self?.handlePathChange(path) }
+      Task { @MainActor [weak self] in self?.handlePathChange(path) }
     }
     pathMonitor.start(queue: DispatchQueue.global(qos: .utility))
   }

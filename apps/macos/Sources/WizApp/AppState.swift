@@ -43,21 +43,90 @@ final class AppState: ObservableObject {
 
   // MARK: - System power-off preferences
 
-  /// Turn the selected light off just before the Mac sleeps / shuts down. These
+  /// What to do with the selected light when the Mac sleeps / shuts down. These
   /// are macOS-only behaviours with no meaning to the shared cross-tool store,
   /// so — like `UpdateChecker.autoCheckEnabled` — they live in `UserDefaults`
   /// rather than `settings.json` (whose schema the CLI mirrors and would strip
-  /// unknown keys from). Both default off: turning off a physical light
-  /// unprompted would surprise a user who hadn't opted in. Read once in `init`;
-  /// `didSet` persists every later change. The triggers live in `AppDelegate`.
-  @Published var powerOffOnSleep: Bool {
-    didSet { UserDefaults.standard.set(powerOffOnSleep, forKey: Self.powerOffOnSleepKey) }
+  /// unknown keys from). Both default to `.turnOffThenRestore` (and the app opens
+  /// at login) so out of the box the light follows the Mac's power state and comes
+  /// back as you left it; an explicit choice, once made, is preserved. Read once in
+  /// `init` (migrating the pre-5.x Bool prefs forward); `didSet` persists every
+  /// later change. The triggers live in `AppDelegate`.
+  enum PowerEventAction: String {
+    /// Leave the light as it is.
+    case doNothing
+    /// Turn the light off; leave it off when the Mac returns.
+    case turnOff
+    /// Turn the light off, then back on when the Mac wakes / next launches. The
+    /// bulb remembers its own colour/brightness, so "on" restores the prior look.
+    case turnOffThenRestore
   }
-  @Published var powerOffOnShutdown: Bool {
-    didSet { UserDefaults.standard.set(powerOffOnShutdown, forKey: Self.powerOffOnShutdownKey) }
+  @Published var sleepAction: PowerEventAction {
+    didSet { UserDefaults.standard.set(sleepAction.rawValue, forKey: Self.sleepActionKey) }
   }
-  private static let powerOffOnSleepKey = "com.wizlightcontroller.poweroff.onSleep"
-  private static let powerOffOnShutdownKey = "com.wizlightcontroller.poweroff.onShutdown"
+  @Published var shutdownAction: PowerEventAction {
+    didSet {
+      UserDefaults.standard.set(shutdownAction.rawValue, forKey: Self.shutdownActionKey)
+      // Restoring after a full shutdown needs the app running again at boot — so
+      // opt into launching at login. Only ever auto-*enable* (never tear down a
+      // login item the user may want for other reasons); they can still turn the
+      // toggle back off, and the Settings hint then warns restore won't fire.
+      if shutdownAction == .turnOffThenRestore, !openAtLogin { openAtLogin = true }
+    }
+  }
+  /// Relaunch the app at login via `SMAppService` (see `LoginItem`). Surfaced as a
+  /// Settings toggle and auto-enabled when `shutdownAction` is `.turnOffThenRestore`
+  /// (the only way to be running at boot to restore the light). Defaults on; the
+  /// user's intent is persisted so an explicit opt-out sticks, and `init` reconciles
+  /// the actual registration to it (registering on first launch).
+  @Published var openAtLogin: Bool {
+    didSet {
+      guard openAtLogin != oldValue else { return }
+      UserDefaults.standard.set(openAtLogin, forKey: Self.openAtLoginKey)
+      LoginItem.setEnabled(openAtLogin)
+    }
+  }
+  private static let openAtLoginKey = "com.wizlightcontroller.openAtLogin"
+  private static let sleepActionKey = "com.wizlightcontroller.poweroff.sleepAction"
+  private static let shutdownActionKey = "com.wizlightcontroller.poweroff.shutdownAction"
+  /// Pre-5.x Bool prefs, migrated forward on first read (see `loadPowerAction`).
+  private static let legacySleepKey = "com.wizlightcontroller.poweroff.onSleep"
+  private static let legacyShutdownKey = "com.wizlightcontroller.poweroff.onShutdown"
+  /// Set just before a shutdown power-off when restore is on, so the next launch
+  /// knows to turn the light back on. Cleared on read in `init`.
+  private static let pendingBootRestoreKey = "com.wizlightcontroller.poweroff.pendingBootRestore"
+
+  /// A pending "turn the light back on" intent for a `.turnOffThenRestore` event,
+  /// honoured only until this deadline — past it the bulb stayed unreachable and
+  /// we drop the intent rather than switch it on at a surprising later time. Armed
+  /// at wake / boot, consumed by `syncAttempt` the moment the bulb is reachable.
+  private var restoreOnDeadline: Date?
+  /// Set at sleep when we turned an on, reachable light off with restore enabled;
+  /// consumed at wake to arm `restoreOnDeadline`.
+  private var pendingWakeRestore = false
+  /// Grace windows for the restore-on intent. Boot gets longer than wake — login
+  /// + Wi-Fi association after a cold start take longer than a wake from sleep.
+  private static let restoreWindowAfterWake: TimeInterval = 120
+  private static let restoreWindowAfterBoot: TimeInterval = 300
+  /// Max system uptime (seconds since boot) at launch for a pending boot-restore to
+  /// count as a real login-launch, vs. the user opening the app by hand long after.
+  private static let bootRestoreUptimeWindow: TimeInterval = 300
+
+  /// Read a power-event action. With no stored choice it defaults to
+  /// `.turnOffThenRestore`. A pre-5.x Bool pref is migrated forward the first time
+  /// (legacy `true` → `.turnOff`, an explicit legacy `false` → `.doNothing`), so a
+  /// user who'd touched the old toggle keeps that choice. The new key, once written
+  /// by `didSet`, wins.
+  private static func loadPowerAction(_ key: String, legacyBool legacyKey: String) -> PowerEventAction {
+    let defaults = UserDefaults.standard
+    if let raw = defaults.string(forKey: key), let action = PowerEventAction(rawValue: raw) {
+      return action
+    }
+    if defaults.object(forKey: legacyKey) != nil {
+      return defaults.bool(forKey: legacyKey) ? .turnOff : .doNothing
+    }
+    return .turnOffThenRestore
+  }
 
   /// Connection lifecycle for the selected light — the single source of truth for
   /// the status dot/text in both the controls window and the menu-bar popover.
@@ -162,13 +231,31 @@ final class AppState: ObservableObject {
   private var lastBrightness = 100
 
   init() {
-    // Restore the macOS-only power-off prefs (default off when unset). Assigning
-    // a `didSet` property here doesn't fire the observer, so the default isn't
-    // written back to disk.
-    powerOffOnSleep = UserDefaults.standard.bool(forKey: Self.powerOffOnSleepKey)
-    powerOffOnShutdown = UserDefaults.standard.bool(forKey: Self.powerOffOnShutdownKey)
+    // Restore the macOS-only power prefs, migrating the pre-5.x Bool prefs forward
+    // (see `loadPowerAction`). Assigning a `didSet` property here doesn't fire the
+    // observer, so nothing is written back to disk and `shutdownAction`'s
+    // auto-enable of the login item doesn't run spuriously at launch.
+    sleepAction = Self.loadPowerAction(Self.sleepActionKey, legacyBool: Self.legacySleepKey)
+    shutdownAction = Self.loadPowerAction(Self.shutdownActionKey, legacyBool: Self.legacyShutdownKey)
+    // Open at login by default; honour an explicit opt-out once the user sets one.
+    let wantsLogin = UserDefaults.standard.object(forKey: Self.openAtLoginKey) as? Bool ?? true
+    openAtLogin = wantsLogin
     // Seed from the engine's default before loading persisted state.
     self.state = core.defaultState
+    // Match the actual login-item registration to that intent (the assignment above
+    // doesn't fire `didSet`): registers on first launch, or undoes a drift.
+    if wantsLogin != LoginItem.isEnabled { LoginItem.setEnabled(wantsLogin) }
+    // Boot-restore: if we turned the light off for a shutdown last time with
+    // restore on, arm a one-shot turn-on — but only when we actually launched at
+    // boot (short system uptime), so opening the app by hand long after a normal
+    // start-up doesn't surprise-toggle the light. The flag is cleared on read
+    // either way; `loadPersisted`'s connect below consumes the deadline.
+    if UserDefaults.standard.bool(forKey: Self.pendingBootRestoreKey) {
+      UserDefaults.standard.set(false, forKey: Self.pendingBootRestoreKey)
+      if ProcessInfo.processInfo.systemUptime < Self.bootRestoreUptimeWindow {
+        restoreOnDeadline = Date().addingTimeInterval(Self.restoreWindowAfterBoot)
+      }
+    }
     loadPersisted()
     startReconnectPolling()
     startNetworkMonitor()
@@ -599,6 +686,10 @@ final class AppState: ObservableObject {
           if next.on, next.brightness > 0 { self.lastBrightness = next.brightness }
           self.deviceInfo.rssi = (result["rssi"] as? NSNumber)?.intValue ?? self.deviceInfo.rssi
           self.loadDeviceConfig(host: host, client: client)
+          // Reachable again — if a wake/boot restore is pending, turn the light
+          // back on now (after the read above, so our turn-on wins over the bulb's
+          // reported off).
+          self.consumeRestoreOn()
           self.bump()
         } else if attempt + 1 < Self.maxSyncAttempts {
           DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) { [weak self] in
@@ -688,6 +779,7 @@ final class AppState: ObservableObject {
   /// auto-reconnect poll until the user reconnects (Reconnect / re-select / Sync).
   func disconnect() {
     guard hasLight else { return }
+    cancelPendingRestore()  // user took control; don't auto-restore behind their back
     manuallyDisconnected = true
     status = .disconnected
     healthFailures = 0
@@ -923,6 +1015,7 @@ final class AppState: ObservableObject {
   /// return at the ~1% passed through on the way to off) and re-sends the full
   /// state; turning off is a bare power-off.
   func setPower(_ on: Bool) {
+    cancelPendingRestore()  // an explicit power choice supersedes a pending restore
     lastLocalEdit = Date()
     if on {
       if lastBrightness > 0 { setBrightness(lastBrightness) }  // also recomputes Warm Glow temp
@@ -936,18 +1029,67 @@ final class AppState: ObservableObject {
     }
   }
 
-  // MARK: - Power off on system events
+  // MARK: - Power off / restore on system events
 
-  /// Called from `AppDelegate` when the Mac is about to sleep. Honours the
-  /// `powerOffOnSleep` preference.
+  /// Called from `AppDelegate` when the Mac is about to sleep. Turns the light off
+  /// per `sleepAction`, and — for `.turnOffThenRestore` — remembers to bring it
+  /// back on at wake, but only if it was actually on and reachable now (so a light
+  /// we'd left off, or whose state we couldn't confirm, isn't switched on later).
   func powerOffForSleep() {
-    if powerOffOnSleep { sendPowerOffNow() }
+    guard sleepAction != .doNothing else { return }
+    pendingWakeRestore = sleepAction == .turnOffThenRestore && connected && state.on
+    sendPowerOffNow()
   }
 
   /// Called from `AppDelegate` when the Mac is shutting down / logging out /
-  /// restarting. Honours the `powerOffOnShutdown` preference.
+  /// restarting. Turns the light off per `shutdownAction`; for `.turnOffThenRestore`
+  /// (and only if it was on and reachable) it persists a flag so the next launch
+  /// turns it back on — see the boot-restore block in `init`.
   func powerOffForShutdown() {
-    if powerOffOnShutdown { sendPowerOffNow() }
+    guard shutdownAction != .doNothing else { return }
+    if shutdownAction == .turnOffThenRestore, connected, state.on {
+      UserDefaults.standard.set(true, forKey: Self.pendingBootRestoreKey)
+      // We return `.terminateNow` right after this and the process is killed during
+      // shutdown — force the flag to disk now, since UserDefaults' async flush may
+      // not finish first (which would silently drop the restore next boot).
+      UserDefaults.standard.synchronize()
+    }
+    sendPowerOffNow()
+  }
+
+  /// Called from `AppDelegate` on `NSWorkspace.didWakeNotification`. If we turned
+  /// the light off for sleep with restore on, arm a one-shot turn-on: Wi-Fi may
+  /// still be reassociating, so re-probe now and let the connect path (or a later
+  /// backoff retry / network-change reconnect) deliver the turn-on once the bulb is
+  /// reachable, within `restoreWindowAfterWake`.
+  func lightShouldRestoreOnWake() {
+    guard pendingWakeRestore else { return }
+    pendingWakeRestore = false
+    restoreOnDeadline = Date().addingTimeInterval(Self.restoreWindowAfterWake)
+    resetReconnectBackoff()
+    sync()
+  }
+
+  /// Turn the light back on for a pending wake/boot restore, if still within the
+  /// grace window. Called from `syncAttempt` the moment the bulb is first reachable
+  /// again — the connect read just before this already folded the bulb's remembered
+  /// colour/brightness into `state` (WiZ reports them even while off), so we only
+  /// flip it on; a bare power-on lets the bulb light back up to that same look.
+  private func consumeRestoreOn() {
+    guard let deadline = restoreOnDeadline else { return }
+    restoreOnDeadline = nil
+    guard Date() < deadline, let client = client else { return }
+    state.on = true
+    client.power(true)
+    bump()
+  }
+
+  /// Drop any pending wake/boot restore. Called when the user takes explicit
+  /// control of power (toggling the light, or disconnecting) so an armed restore
+  /// can't later override that deliberate choice during its grace window.
+  private func cancelPendingRestore() {
+    pendingWakeRestore = false
+    restoreOnDeadline = nil
   }
 
   /// Turn the light off *synchronously*, blocking until the datagrams are on the

@@ -1,6 +1,6 @@
 {
   "name": "wiz-light-controller",
-  "version": "5.0.1",
+  "version": "5.1.0",
   "private": true,
   "description": "Fast, local, cloud-free controller for Philips WiZ lights — a modular JavaScript engine (reused by a CLI and a native macOS app via JavaScriptCore).",
   "license": "GPL-3.0-or-later",

@@ -1,7 +1,8 @@
 import SwiftUI
 import WizKit
 
-/// App settings: the auto-sync toggle and the update-check controls, persisted.
+/// App settings: auto-sync, the sleep/shutdown power actions, open-at-login, and
+/// the update-check controls, all persisted.
 struct SettingsView: View {
   @EnvironmentObject var app: AppState
 
@@ -20,8 +21,22 @@ struct SettingsView: View {
       }
       Section("Behaviour") {
         Toggle("Auto-sync from the light on launch", isOn: autoSyncBinding)
-        Toggle("Turn the light off when the Mac sleeps", isOn: $app.powerOffOnSleep)
-        Toggle("Turn the light off when the Mac shuts down", isOn: $app.powerOffOnShutdown)
+        Picker("When the Mac sleeps", selection: $app.sleepAction) {
+          Text("Do nothing").tag(AppState.PowerEventAction.doNothing)
+          Text("Turn off").tag(AppState.PowerEventAction.turnOff)
+          Text("Turn off, then restore on wake").tag(AppState.PowerEventAction.turnOffThenRestore)
+        }
+        Picker("When the Mac shuts down", selection: $app.shutdownAction) {
+          Text("Do nothing").tag(AppState.PowerEventAction.doNothing)
+          Text("Turn off").tag(AppState.PowerEventAction.turnOff)
+          Text("Turn off, then restore on startup").tag(AppState.PowerEventAction.turnOffThenRestore)
+        }
+        Toggle("Open at login", isOn: $app.openAtLogin)
+        if app.shutdownAction == .turnOffThenRestore, !app.openAtLogin {
+          Text("Restoring on startup needs the app to open at login.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
       }
       Section("Updates") {
         UpdateRow()

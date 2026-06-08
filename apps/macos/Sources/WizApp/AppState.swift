@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import Network
 import SwiftUI
 import WizKit
 
@@ -119,6 +120,16 @@ final class AppState: ObservableObject {
   /// Set when the user explicitly disconnects, to stop the auto-reconnect poll
   /// from immediately re-establishing. Cleared by any explicit `sync`.
   private var manuallyDisconnected = false
+  /// Current auto-reconnect delay. Grows from `reconnectBackoffFloor` toward
+  /// `reconnectBackoffCeiling` with each failed attempt and is reset to the floor
+  /// on a successful connect, a network change, or a user action. See `pollTick`.
+  private var reconnectBackoff: TimeInterval = AppState.reconnectBackoffFloor
+  /// Watches for network path changes (joining/switching Wi-Fi, VPN, etc.) so a
+  /// dropped link is retried promptly instead of waiting out the backoff.
+  private let pathMonitor = NWPathMonitor()
+  /// Signature of the last network path, so duplicate updates are ignored and we
+  /// react once per real change.
+  private var lastNetworkSignature: String?
   /// Consecutive silent health pings while connected; we drop to disconnected
   /// once this reaches `maxHealthFailures` (so a single blip doesn't flap).
   private var healthFailures = 0
@@ -137,9 +148,13 @@ final class AppState: ObservableObject {
     self.state = core.defaultState
     loadPersisted()
     startReconnectPolling()
+    startNetworkMonitor()
   }
 
-  deinit { reconnectTimer?.cancel() }
+  deinit {
+    reconnectTimer?.cancel()
+    pathMonitor.cancel()
+  }
 
   /// The bulb's real white range, negotiated from `getModelConfig` (`cctRange`)
   /// on connect; `nil` until then. Published so the sliders update when it lands.
@@ -381,6 +396,8 @@ final class AppState: ObservableObject {
   func selectLight(
     name: String, ip: String, mac: String, persistIp: Bool = true, connect: Bool = true
   ) {
+    // A (re)selected light is a fresh start — clear any grown reconnect backoff.
+    resetReconnectBackoff()
     // An empty name is kept empty (not defaulted to the IP) so `displayName` can
     // fall back to the bulb's module name instead of rendering "IP — IP".
     selectedName = name
@@ -448,6 +465,14 @@ final class AppState: ObservableObject {
   /// Gap between those probes — long enough to let a micro-sleeping bulb wake,
   /// short enough that a real drop still settles well within the 15 s cadence.
   private static let healthProbeRetryMs = 150
+  /// The connected health-check cadence: a `getPilot` every 15 s (see `pollTick`).
+  private static let healthPollInterval: TimeInterval = 15
+  /// Auto-reconnect backoff bounds. After a drop we retry after `floor` seconds,
+  /// doubling each failed attempt up to `ceiling` (5 min), so a bulb that's
+  /// powered off or out of range isn't probed every 15 s forever. Reset to the
+  /// floor on a successful connect, a network change, or a user action.
+  private static let reconnectBackoffFloor: TimeInterval = 15
+  private static let reconnectBackoffCeiling: TimeInterval = 300
 
   /// Query the bulb (`getPilot`) and fold the result into `state`, updating
   /// `connected`. Retries a few times on failure so a valid, reachable bulb
@@ -517,6 +542,10 @@ final class AppState: ObservableObject {
         if let result = result, let parsed = self.core.parsePilot(result) {
           self.status = .connected
           self.healthFailures = 0
+          // Reconnected: clear the backoff and resume the 15 s health cadence now
+          // (the pending tick may be a long backoff out after a lengthy outage).
+          self.reconnectBackoff = Self.reconnectBackoffFloor
+          self.scheduleNextPoll(after: Self.healthPollInterval)
           // Preserve the user's last RGB if the bulb reports white mode (so
           // flipping back to RGB restores their colour rather than white).
           var next = self.perceivedState(parsed, from: result)
@@ -609,6 +638,7 @@ final class AppState: ObservableObject {
       bump()
       return
     }
+    resetReconnectBackoff()
     status = .connecting
     client = WizClient(host: selectedIp)
     bump()
@@ -622,27 +652,94 @@ final class AppState: ObservableObject {
     manuallyDisconnected = true
     status = .disconnected
     healthFailures = 0
+    resetReconnectBackoff()
     bump()
   }
 
-  /// A 15 s housekeeping poll. While disconnected it quietly retries (so a
-  /// transient drop — micro-sleep, Wi-Fi blip, the first-launch Local-Network
-  /// prompt — heals without the user hitting Reconnect). While connected it
-  /// health-checks the link via `refreshSignal`: a reply refreshes the signal,
-  /// and a few consecutive silences drop it to disconnected.
+  /// A housekeeping poll that re-arms itself each tick, so its cadence can vary.
+  /// While connected it health-checks the link every `healthPollInterval` via
+  /// `refreshSignal` (a reply refreshes the signal; a few consecutive silences
+  /// drop it). While disconnected it quietly retries the connection — so a
+  /// transient drop (micro-sleep, Wi-Fi blip, the first-launch Local-Network
+  /// prompt) heals without the user hitting Reconnect — on a backoff that doubles
+  /// from `reconnectBackoffFloor` to `reconnectBackoffCeiling`, so a bulb that's
+  /// powered off or out of range isn't probed every 15 s indefinitely.
   private func startReconnectPolling() {
+    scheduleNextPoll(after: Self.healthPollInterval)
+  }
+
+  /// Arm a one-shot poll `interval` seconds out, replacing any pending tick.
+  private func scheduleNextPoll(after interval: TimeInterval) {
+    reconnectTimer?.cancel()
     let timer = DispatchSource.makeTimerSource(queue: .main)
-    timer.schedule(deadline: .now() + 15, repeating: 15)
-    timer.setEventHandler { [weak self] in
-      guard let self = self, self.hasLight else { return }
-      if self.connected {
-        self.refreshSignal(monitorHealth: true)
-      } else if !self.manuallyDisconnected {
-        self.sync()
-      }
-    }
+    timer.schedule(deadline: .now() + interval)
+    timer.setEventHandler { [weak self] in self?.pollTick() }
     timer.resume()
     reconnectTimer = timer
+  }
+
+  /// One poll iteration: health-check while connected, retry-with-backoff while
+  /// dropped, idle otherwise — then re-arm the next tick at the right cadence.
+  private func pollTick() {
+    guard hasLight else {
+      scheduleNextPoll(after: Self.healthPollInterval)  // nothing to do; re-check later
+      return
+    }
+    if connected {
+      refreshSignal(monitorHealth: true)
+      scheduleNextPoll(after: Self.healthPollInterval)
+    } else if manuallyDisconnected {
+      scheduleNextPoll(after: Self.healthPollInterval)  // idle until the user reconnects
+    } else if isConnecting {
+      // A connect attempt is already in flight (e.g. a network-change tick landed
+      // mid-sync) — don't stack another; check back at the base cadence. `sync`
+      // always resolves within ~10 s, so this can't stall the poll.
+      scheduleNextPoll(after: Self.healthPollInterval)
+    } else {
+      // Dropped (or never reached): retry now, then back off the next attempt. A
+      // successful connect (`syncAttempt`), a network change (`handlePathChange`),
+      // or a user action resets `reconnectBackoff` to the floor.
+      sync()
+      reconnectBackoff = min(reconnectBackoff * 2, Self.reconnectBackoffCeiling)
+      scheduleNextPoll(after: reconnectBackoff)
+    }
+  }
+
+  /// Reset the auto-reconnect backoff to its floor (fast retries again).
+  private func resetReconnectBackoff() { reconnectBackoff = Self.reconnectBackoffFloor }
+
+  /// Start watching the network path. Joining or switching Wi-Fi (or any change
+  /// to a usable path) is a fresh chance to reach the bulb, so we reset the
+  /// backoff and bring the next reconnect attempt forward rather than waiting out
+  /// a backoff that may have grown to minutes while we were away.
+  private func startNetworkMonitor() {
+    pathMonitor.pathUpdateHandler = { [weak self] path in
+      // NWPathMonitor calls back on its own queue; AppState is main-actor isolated.
+      Task { @MainActor in self?.handlePathChange(path) }
+    }
+    pathMonitor.start(queue: DispatchQueue.global(qos: .utility))
+  }
+
+  /// React to a network path change. Ignores duplicate updates (the OS emits
+  /// several while an interface flaps) and only acts on a usable path: it resets
+  /// the backoff and pulls the next poll forward, so a dropped link reconnects
+  /// within a second of rejoining a network instead of minutes later.
+  private func handlePathChange(_ path: NWPath) {
+    let signature =
+      "\(path.status):"
+      + path.availableInterfaces.map(\.name).sorted().joined(separator: ",")
+    guard signature != lastNetworkSignature else { return }
+    lastNetworkSignature = signature
+    guard path.status == .satisfied else { return }
+    resetReconnectBackoff()
+    // A usable network just appeared — bring the next poll forward so we retry
+    // promptly instead of waiting out a backoff grown to minutes. `pollTick` owns
+    // the connect guards and won't stack onto an in-flight attempt, so we just
+    // reschedule. Skip while connected (the health poll covers it) or after a
+    // manual disconnect.
+    if hasLight, !manuallyDisconnected, !connected {
+      scheduleNextPoll(after: 0.5)
+    }
   }
 
   /// Health check + state refresh for the connected poll. A reply refreshes the

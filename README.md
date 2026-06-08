@@ -17,7 +17,7 @@ Mirrors the original app's capabilities:
 - **Brightness** — 0–100% (clamped to the firmware-valid floor; see below).
 - **Presets** — seeded RGB + white presets, with apply / match.
 - **Sync from light** — read a bulb's current state (`getPilot`) back into the UI.
-- **Settings** — accent/highlight colour and auto-sync, persisted locally.
+- **Settings** — accent/highlight colour, auto-sync, and auto-off when the Mac sleeps or shuts down, persisted locally.
 
 ## Screenshots
 
@@ -39,7 +39,7 @@ The native macOS app: a menu-bar dropdown for quick changes, and a full controls
 
 <img src="assets/screenshot-discover.png" alt="Discovery sheet (annotated)" width="480">
 
-**Settings** — device info, auto-sync, and update checks:
+**Settings** — device info, auto-sync, auto-off on sleep/shutdown, and update checks:
 
 <img src="assets/screenshot-settings.png" alt="Settings tab (annotated)" width="500">
 

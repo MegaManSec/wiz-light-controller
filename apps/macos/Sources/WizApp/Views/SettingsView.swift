@@ -20,6 +20,8 @@ struct SettingsView: View {
       }
       Section("Behaviour") {
         Toggle("Auto-sync from the light on launch", isOn: autoSyncBinding)
+        Toggle("Turn the light off when the Mac sleeps", isOn: $app.powerOffOnSleep)
+        Toggle("Turn the light off when the Mac shuts down", isOn: $app.powerOffOnShutdown)
       }
       Section("Updates") {
         UpdateRow()

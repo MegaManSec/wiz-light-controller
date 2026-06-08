@@ -40,6 +40,24 @@ final class AppState: ObservableObject {
   /// Persisted UI settings (accent / highlight / auto-sync).
   @Published var settings: Stores.Settings = .defaults
 
+  // MARK: - System power-off preferences
+
+  /// Turn the selected light off just before the Mac sleeps / shuts down. These
+  /// are macOS-only behaviours with no meaning to the shared cross-tool store,
+  /// so — like `UpdateChecker.autoCheckEnabled` — they live in `UserDefaults`
+  /// rather than `settings.json` (whose schema the CLI mirrors and would strip
+  /// unknown keys from). Both default off: turning off a physical light
+  /// unprompted would surprise a user who hadn't opted in. Read once in `init`;
+  /// `didSet` persists every later change. The triggers live in `AppDelegate`.
+  @Published var powerOffOnSleep: Bool {
+    didSet { UserDefaults.standard.set(powerOffOnSleep, forKey: Self.powerOffOnSleepKey) }
+  }
+  @Published var powerOffOnShutdown: Bool {
+    didSet { UserDefaults.standard.set(powerOffOnShutdown, forKey: Self.powerOffOnShutdownKey) }
+  }
+  private static let powerOffOnSleepKey = "com.wizlightcontroller.poweroff.onSleep"
+  private static let powerOffOnShutdownKey = "com.wizlightcontroller.poweroff.onShutdown"
+
   /// Connection lifecycle for the selected light — the single source of truth for
   /// the status dot/text in both the controls window and the menu-bar popover.
   /// `connected` is *derived* from this (below) so the boolean and the displayed
@@ -133,6 +151,11 @@ final class AppState: ObservableObject {
   private var lastBrightness = 100
 
   init() {
+    // Restore the macOS-only power-off prefs (default off when unset). Assigning
+    // a `didSet` property here doesn't fire the observer, so the default isn't
+    // written back to disk.
+    powerOffOnSleep = UserDefaults.standard.bool(forKey: Self.powerOffOnSleepKey)
+    powerOffOnShutdown = UserDefaults.standard.bool(forKey: Self.powerOffOnShutdownKey)
     // Seed from the engine's default before loading persisted state.
     self.state = core.defaultState
     loadPersisted()
@@ -798,6 +821,35 @@ final class AppState: ObservableObject {
       client.power(false)
       bump()
     }
+  }
+
+  // MARK: - Power off on system events
+
+  /// Called from `AppDelegate` when the Mac is about to sleep. Honours the
+  /// `powerOffOnSleep` preference.
+  func powerOffForSleep() {
+    if powerOffOnSleep { sendPowerOffNow() }
+  }
+
+  /// Called from `AppDelegate` when the Mac is shutting down / logging out /
+  /// restarting. Honours the `powerOffOnShutdown` preference.
+  func powerOffForShutdown() {
+    if powerOffOnShutdown { sendPowerOffNow() }
+  }
+
+  /// Turn the light off *synchronously*, blocking until the datagrams are on the
+  /// wire. The normal `setPower(false)` path debounces and sends on a background
+  /// queue, but the system can cut Wi-Fi the instant the sleep / terminate
+  /// handler returns — a deferred send would never leave the machine. `sendNow`
+  /// fires the off command 3× (≈240 ms) to ride out UDP loss; the optimistic
+  /// local `state.on = false` keeps the menu-bar icon correct on wake. We send
+  /// regardless of the last-known on/off so a stale "off" can't strand a lit
+  /// bulb. No-op without a selected light.
+  private func sendPowerOffNow() {
+    guard hasLight, let client = client else { return }
+    client.sendNow(["state": false])
+    state.on = false
+    bump()
   }
 
   /// Apply a preset to the current state (via the engine), then send it.

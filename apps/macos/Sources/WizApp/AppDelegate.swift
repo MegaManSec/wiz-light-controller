@@ -225,10 +225,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   }
 
   /// Refresh the dropdown just before it opens: re-read a connected light's values
-  /// (without reconnecting a disconnected one), and resize the hosted view to its
-  /// current content (connected vs. disconnected differ in height).
+  /// (or, mid auto-reconnect, bring the next attempt forward — but never resurrect
+  /// a manual disconnect), and resize the hosted view to its current content
+  /// (connected vs. disconnected differ in height).
   func menuWillOpen(_ menu: NSMenu) {
-    appState.refreshIfConnected()
+    appState.refreshOnOpen()
     dropdownContentView?.updateFrameToFit()
   }
 

@@ -146,11 +146,13 @@ describe('validate: clampTemp', () => {
 });
 
 describe('validate: clampSpeed', () => {
-  it('constrains a dynamic-scene speed to [1, 100]', () => {
+  it('constrains a dynamic-scene speed to the firmware band [10, 200]', () => {
+    assert.equal(SPEED_MIN, 10);
+    assert.equal(SPEED_MAX, 200);
     assert.equal(clampSpeed(0), SPEED_MIN);
-    assert.equal(clampSpeed(1), 1);
-    assert.equal(clampSpeed(50), 50);
+    assert.equal(clampSpeed(10), 10);
     assert.equal(clampSpeed(100), 100);
+    assert.equal(clampSpeed(200), 200);
     assert.equal(clampSpeed(999), SPEED_MAX);
   });
 });

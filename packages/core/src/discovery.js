@@ -12,7 +12,7 @@ const defaultCreateSocket = () => dgram.createSocket({ type: 'udp4', reuseAddr: 
  * @typedef {Object} DiscoveredLight
  * @property {string} name  Module name, falling back to the MAC.
  * @property {string} ip
- * @property {string} mac
+ * @property {string} mac   `''` when the reply omitted one (never undefined).
  */
 
 /**
@@ -81,7 +81,12 @@ export function discover({
       const mac = result.mac;
       const key = mac || rinfo.address;
       if (found.has(key)) return;
-      const light = { name: result.moduleName || mac || rinfo.address, ip: rinfo.address, mac };
+      // mac is '' (not undefined) when unreported, matching the Swift Discovery.
+      const light = {
+        name: result.moduleName || mac || rinfo.address,
+        ip: rinfo.address,
+        mac: mac || '',
+      };
       found.set(key, light);
       onFound?.(light);
     });

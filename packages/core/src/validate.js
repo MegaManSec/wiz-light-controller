@@ -46,11 +46,11 @@ export const clampBrightness = (n) => clampInt(n, 0, 100);
 /** Clamp a colour temperature to the WiZ-supported Kelvin range. */
 export const clampTemp = (k) => clampInt(k, TEMP_MIN, TEMP_MAX);
 
-/** Dynamic-scene animation speed band (matches the WiZ app / pywizlight). */
-export const SPEED_MIN = 1;
-export const SPEED_MAX = 100;
+/** Dynamic-scene animation speed band (matches the WiZ app / pywizlight: 100 = normal). */
+export const SPEED_MIN = 10;
+export const SPEED_MAX = 200;
 
-/** Clamp a dynamic-scene speed to the meaningful [1, 100] band. */
+/** Clamp a dynamic-scene speed to the firmware-accepted [10, 200] band. */
 export const clampSpeed = (n) => clampInt(n, SPEED_MIN, SPEED_MAX);
 
 /**

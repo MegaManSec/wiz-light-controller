@@ -8,20 +8,22 @@ Fast, **local, cloud-free** control for Philips WiZ smart bulbs. It talks to bul
 
 ## Features
 
-Mirrors the original app's capabilities:
+Mirrors the original app's capabilities, and adds more:
 
 - **Discovery** — find WiZ bulbs on your network (UDP broadcast), keyed by MAC.
 - **Saved lights** — remember bulbs by **MAC** with a friendly name; the IP is re-resolved on discovery, so it survives DHCP changes.
-- **Colour** — a **colour wheel** plus direct **RGB / HSV / hex** entry, with per-device colour memory.
+- **Colour** — a **colour wheel** plus direct **RGB / HSV / hex** entry, with per-device colour memory and an optional **"Brighter colours"** white-LED blend.
 - **White temperature** — tunable white over the bulb's own negotiated range (e.g. **2200–6500 K**).
+- **Warm Glow** — a one-knob cosy mode: set brightness and the temperature auto-follows the bulb's dim-to-warm curve (warmer as you dim), with one-tap glow levels.
+- **Scenes** — run a bulb's built-in **dynamic scenes** (Party, Ocean, Fireplace, …) with adjustable speed, on bulbs that support them.
 - **Brightness** — 0–100% (clamped to the firmware-valid floor; see below).
 - **Presets** — seeded RGB + white presets, with apply / match.
-- **Sync from light** — read a bulb's current state (`getPilot`) back into the UI.
-- **Settings** — accent/highlight colour, auto-sync, and auto-off when the Mac sleeps or shuts down, persisted locally.
+- **Sync from light** — read a bulb's current state (`getPilot`) back into the UI, and reflect changes made elsewhere (e.g. the phone app).
+- **Settings** — auto-sync on launch; turn the light **off when the Mac sleeps or shuts down** — and optionally **restore it** on wake / startup; open at login; update checks. Persisted locally.
 
 ## Screenshots
 
-The native macOS app: a menu-bar dropdown for quick changes, and a full controls window. Each shot is annotated — the numbered callouts are explained beneath it.
+The native macOS app: a menu-bar dropdown for quick changes, and a full controls window with four modes — **RGB**, **White**, **Warm Glow**, and **Scenes**. Each shot is annotated — the numbered callouts are explained beneath it.
 
 **Menu-bar dropdown** — click the bulb for instant control, no window needed:
 
@@ -31,17 +33,25 @@ The native macOS app: a menu-bar dropdown for quick changes, and a full controls
 
 <img src="assets/screenshot-rgb.png" alt="RGB colour controls (annotated)" width="520">
 
-**Controls — white & presets** — tunable colour temperature and one-tap presets:
+**Controls — white** — tunable colour temperature with one-tap white presets:
 
 <img src="assets/screenshot-white.png" alt="White temperature and presets (annotated)" width="520">
 
-**Discover** — find bulbs on your LAN and save them:
+**Controls — Warm Glow** — one knob: brightness leads, and the temperature follows the dim-to-warm curve:
 
-<img src="assets/screenshot-discover.png" alt="Discovery sheet (annotated)" width="480">
+<img src="assets/screenshot-warmglow.png" alt="Warm Glow controls (annotated)" width="520">
 
-**Settings** — device info, auto-sync, auto-off on sleep/shutdown, and update checks:
+**Controls — Scenes** — a bulb's built-in dynamic scenes, with adjustable speed (on bulbs that support them):
 
-<img src="assets/screenshot-settings.png" alt="Settings tab (annotated)" width="500">
+<img src="assets/screenshot-scenes.png" alt="Scenes grid (annotated)" width="520">
+
+**Discover** — scan the LAN, then save a new bulb or manage a saved one:
+
+<img src="assets/screenshot-discover.png" alt="Discovery sheet (annotated)" width="500">
+
+**Settings** — device info, auto-sync, sleep / shutdown power behaviour, open-at-login, and updates:
+
+<img src="assets/screenshot-settings.png" alt="Settings tab (annotated)" width="520">
 
 ## Install
 

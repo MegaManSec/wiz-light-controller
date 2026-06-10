@@ -174,10 +174,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   }
 
   /// Close `window` if it's the stray placeholder-scene window: a titled,
-  /// non-sheet window that isn't our controller window. (The dropdown is an
-  /// NSMenu, whose window isn't titled, so it's never matched here.)
+  /// non-sheet, non-panel window that isn't our controller window. (The dropdown
+  /// is an NSMenu, whose window isn't titled, so it's never matched here.
+  /// NSPanels are excluded because system panels — NSColorPanel, NSAlert,
+  /// open/save — are titled too, and this observer runs for the app's lifetime;
+  /// the stray SwiftUI Settings window is a plain NSWindow.)
   private func closeIfStray(_ window: NSWindow) {
-    guard window.styleMask.contains(.titled), !window.isSheet,
+    guard window.styleMask.contains(.titled), !window.isSheet, !(window is NSPanel),
       window !== windowController?.window
     else { return }
     window.close()

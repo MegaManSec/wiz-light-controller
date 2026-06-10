@@ -470,7 +470,7 @@ final class DropdownContentView: NSView {
       color.gradientColors = app.state.mode == .rgb ? hueStops() : tempStops()
     }
     if let speed = speedSlider, !speed.isTracking {
-      speed.value = Double(app.state.scene?.speed ?? 50)
+      speed.value = Double(app.state.scene?.speed ?? 100)
     }
     sceneHeaderLabel?.stringValue =
       app.availableScenes.first { $0.id == app.state.scene?.id }?.name ?? "Choose a scene"
@@ -485,7 +485,7 @@ final class DropdownContentView: NSView {
       ? "Colour (hue) — \(Int(app.hsv.h))°" : "Colour temperature — \(app.state.temp) K"
     colorRow?.toolTip = colorTip
     colorSlider?.toolTip = colorTip
-    let speedTip = "Scene speed — \(app.state.scene?.speed ?? 50)%"
+    let speedTip = "Scene speed — \(app.state.scene?.speed ?? 100)%"
     speedRow?.toolTip = speedTip
     speedSlider?.toolTip = speedTip
     powerSwitch?.toolTip = app.state.on ? "On — tap to turn off" : "Off — tap to turn on"
@@ -751,9 +751,11 @@ final class DropdownContentView: NSView {
 
   private func makeSpeedRow() -> NSView {
     let slider = GradientSliderControl()
-    slider.minValue = 1
-    slider.maxValue = 100
-    slider.value = Double(app.state.scene?.speed ?? 50)
+    // The engine's firmware band (10–200, 100 = normal), so the slider can't
+    // drift from what clampSpeed enforces.
+    slider.minValue = Double(app.core.speedRange.lowerBound)
+    slider.maxValue = Double(app.core.speedRange.upperBound)
+    slider.value = Double(app.state.scene?.speed ?? 100)
     // A progress track: accent-filled up to the thumb, grey after it.
     slider.progressFill = (filled: .controlAccentColor, unfilled: Self.nsColor([90, 90, 90]))
     slider.onEditing = { [weak self] v in self?.app.setSceneSpeed(Int(v.rounded())) }

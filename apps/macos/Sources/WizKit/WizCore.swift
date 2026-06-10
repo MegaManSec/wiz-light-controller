@@ -68,9 +68,20 @@ public final class WizCore {
   /// Fold the bulb's white channels (`c`/`w`) into an RGB triple to approximate
   /// the colour the eye sees — `parsePilot` reports r/g/b only, so a colour the
   /// bulb renders with its white LEDs reads back over-saturated. Display only;
-  /// see color.js `perceivedRgb`.
+  /// never send the result back to the bulb (see color.js `perceivedRgb`) —
+  /// prefer ``whiteMixedToRgb(_:c:w:)`` when the split inverts exactly.
   public func perceivedRgb(_ rgb: [Int], c: Int, w: Int) -> [Int] {
     JSNum.intArray(call("perceivedRgb", [rgb, c, w]).toArray()) ?? rgb
+  }
+
+  /// Exact inverse of the engine's white-mix split (model.js `rgbToWhiteMixed`):
+  /// reconstructs the logical colour from a pilot whose achromatic part rides
+  /// the white LEDs. `nil` when the split isn't invertible (`c != w` — a colour
+  /// set by a foreign sender that weights cool/warm separately); callers then
+  /// fall back to ``perceivedRgb(_:c:w:)`` for a display approximation.
+  public func whiteMixedToRgb(_ rgb: [Int], c: Int, w: Int) -> [Int]? {
+    let v = call("whiteMixedToRgb", [rgb, c, w])
+    return (v.isNull || v.isUndefined) ? nil : JSNum.intArray(v.toArray())
   }
 
   /// Wheel point → hue/saturation, or `nil` outside the wheel.
@@ -200,7 +211,18 @@ public final class WizCore {
     return lo...hi
   }
 
-  /// The seeded presets, grouped `rgb` / `white`, preserving insertion order.
+  /// The dynamic-scene speed band (validate.js `SPEED_MIN`/`SPEED_MAX`, the
+  /// firmware-accepted 10–200 where 100 = normal) — the single source of truth,
+  /// so the speed sliders can't drift from what `clampSpeed` enforces.
+  public var speedRange: ClosedRange<Int> {
+    let lo = Int(core.objectForKeyedSubscript("SPEED_MIN").toInt32())
+    let hi = Int(core.objectForKeyedSubscript("SPEED_MAX").toInt32())
+    return lo...hi
+  }
+
+  /// The seeded presets, grouped `rgb` / `white`, sorted by name — the JS→Swift
+  /// dictionary bridge loses the engine's insertion order, so an explicit sort
+  /// keeps the order stable (and matches `Stores.loadPresets`).
   public func defaultPresets() -> [LightMode: [Preset]] {
     let groups = core.objectForKeyedSubscript("DEFAULT_PRESETS")
     var result: [LightMode: [Preset]] = [.rgb: [], .white: []]

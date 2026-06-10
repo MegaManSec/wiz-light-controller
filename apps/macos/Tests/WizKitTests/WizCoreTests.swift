@@ -20,6 +20,23 @@ final class WizCoreTests: XCTestCase {
     XCTAssertEqual(core.perceivedRgb([255, 0, 65], c: 0, w: 111), [255, 101, 140]) // FF658C
   }
 
+  func testWhiteMixedToRgbInversion() {
+    // Our own "Brighter colours" split drives c/w equally and inverts exactly —
+    // this is what keeps read-backs stable instead of washing toward white.
+    XCTAssertEqual(core.whiteMixedToRgb([55, 0, 0], c: 200, w: 200), [255, 200, 200])
+    XCTAssertEqual(core.whiteMixedToRgb([10, 20, 30], c: 0, w: 0), [10, 20, 30])
+    // A foreign uneven split can't be inverted; callers fall back to perceivedRgb.
+    XCTAssertNil(core.whiteMixedToRgb([255, 0, 65], c: 0, w: 111))
+  }
+
+  func testSpeedRange() {
+    // The firmware band (10–200, 100 = normal) — drives the speed sliders.
+    XCTAssertEqual(core.speedRange, 10...200)
+    XCTAssertEqual(core.clampSpeed(0), 10)
+    XCTAssertEqual(core.clampSpeed(150), 150)
+    XCTAssertEqual(core.clampSpeed(999), 200)
+  }
+
   func testWheelGeometry() {
     XCTAssertNotNil(core.wheelToHS(x: 120, y: 120, size: 240))  // centre is valid
     XCTAssertNil(core.wheelToHS(x: 1000, y: 1000, size: 240))  // outside the wheel
@@ -132,5 +149,10 @@ final class WizCoreTests: XCTestCase {
     XCTAssertEqual(state.mode, .white)
     XCTAssertEqual(state.temp, 3000)
     XCTAssertTrue(core.stateMatchesPreset(state, relax))
+
+    // An off light never highlights a preset — the bulb isn't showing it.
+    var off = state
+    off.on = false
+    XCTAssertFalse(core.stateMatchesPreset(off, relax))
   }
 }

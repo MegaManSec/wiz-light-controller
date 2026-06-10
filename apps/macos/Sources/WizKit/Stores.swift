@@ -1,10 +1,15 @@
 import Foundation
 
-/// Persistence layer, sharing the exact on-disk schema with the wiz-light-core CLI so
-/// the two interoperate against one `~/Library/Application Support/
-/// WizLightController` directory. Reads are corruption-tolerant (missing or
-/// malformed → defaults); writes are atomic (temp file + `replaceItemAt`) so a
-/// crash mid-write can't truncate good data.
+/// Persistence layer, using the exact on-disk schema of the wiz-light-core CLI
+/// stores. **Note on location:** the released app runs under the App Sandbox, so
+/// `.applicationSupportDirectory` resolves *inside its container*
+/// (`~/Library/Containers/com.wizlightcontroller.app/Data/Library/Application
+/// Support/WizLightController`) — not the CLI's `~/Library/Application
+/// Support/WizLightController`. The two tools therefore keep the same format but
+/// each owns its own copy; only an unsandboxed dev run (`swift run` /
+/// `swift test`, no entitlements applied) lands in the CLI's directory. Reads
+/// are corruption-tolerant (missing or malformed → defaults); writes are atomic
+/// (temp file + `replaceItemAt`) so a crash mid-write can't truncate good data.
 ///
 /// File map (mirrors `wiz-light-core` stores):
 /// - `settings.json`     `{accent, highlight, autoSync}`
@@ -153,6 +158,13 @@ public final class Stores {
     writeText(trimmed, to: lastIpURL)
   }
 
+  /// Forget the remembered last-used IP (e.g. the selected light was removed).
+  /// `saveLastIp("")` can't do this — it guards against empty writes — so this
+  /// removes the file instead.
+  public func clearLastIp() {
+    try? FileManager.default.removeItem(at: lastIpURL)
+  }
+
   /// The last colour remembered for `mac`, or `nil` when unknown — so the wheel
   /// can open on this specific light's colour and a white→RGB flip restores it.
   public func loadDeviceRgb(_ mac: String) -> [Int]? {
@@ -177,8 +189,8 @@ public final class Stores {
   /// The bulb's identity (MAC / model / firmware) remembered for a host, so the
   /// menu header and Settings → Device can show it on launch — before, or
   /// without, a live connection. Stored alongside its IP and returned only when
-  /// the IP still matches, so an identity left over from a different address (the
-  /// IP changed, or the CLI repointed `last_ip`) is ignored rather than shown
+  /// the IP still matches, so an identity left over from a different address
+  /// (the IP changed, or `last_ip` was repointed) is ignored rather than shown
   /// against the wrong bulb.
   public func loadLastDevice(
     forIp ip: String

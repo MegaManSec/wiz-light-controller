@@ -109,11 +109,17 @@ final class WheelNSView: NSView {
 
     let cs = CGColorSpaceCreateDeviceRGB()
     let info = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
-    guard let ctx = CGContext(
-      data: &pixels, width: dim, height: dim, bitsPerComponent: 8, bytesPerRow: dim * 4,
-      space: cs, bitmapInfo: info.rawValue),
-      let cg = ctx.makeImage()
-    else { return NSImage(size: bounds.size) }
+    // Both the context and makeImage() must run inside withUnsafeMutableBytes:
+    // a pointer bridged via `&pixels` is only valid for the duration of that one
+    // call, so holding the context past it would be undefined behaviour.
+    let cg: CGImage? = pixels.withUnsafeMutableBytes { buf in
+      guard let ctx = CGContext(
+        data: buf.baseAddress, width: dim, height: dim, bitsPerComponent: 8,
+        bytesPerRow: dim * 4, space: cs, bitmapInfo: info.rawValue)
+      else { return nil }
+      return ctx.makeImage()
+    }
+    guard let cg = cg else { return NSImage(size: bounds.size) }
     return NSImage(cgImage: cg, size: bounds.size)
   }
 

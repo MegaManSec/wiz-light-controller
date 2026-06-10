@@ -12,7 +12,9 @@ import Foundation
 /// netmask via `getifaddrs`), which materially improves the hit rate.
 public enum Discovery {
   /// A discovered bulb. `name` is the module name, falling back to the MAC.
-  public struct Light: Equatable {
+  /// `mac` is `""` when the reply omitted one. Hashable so lists can identify
+  /// rows by the whole value (two MAC-less bulbs would collide on `mac` alone).
+  public struct Light: Equatable, Hashable {
     public let name: String
     public let ip: String
     public let mac: String
@@ -139,7 +141,10 @@ public enum Discovery {
     while let cur = ptr {
       defer { ptr = cur.pointee.ifa_next }
       let flags = Int32(cur.pointee.ifa_flags)
-      guard (flags & IFF_UP) != 0, (flags & IFF_LOOPBACK) == 0,
+      // IFF_BROADCAST: only interfaces that actually have a broadcast address.
+      // A point-to-point link (utun VPNs etc.) has a /32 mask, so addr | ~mask
+      // would just unicast the probe back at our own address.
+      guard (flags & IFF_UP) != 0, (flags & IFF_LOOPBACK) == 0, (flags & IFF_BROADCAST) != 0,
         let sa = cur.pointee.ifa_addr, sa.pointee.sa_family == sa_family_t(AF_INET),
         let nm = cur.pointee.ifa_netmask
       else { continue }

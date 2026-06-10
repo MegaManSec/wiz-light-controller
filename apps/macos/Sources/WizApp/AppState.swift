@@ -462,13 +462,15 @@ final class AppState: ObservableObject {
     presets = stores.loadPresets(defaults: core.defaultPresets())
 
     // Only restore a *saved* light (lights are added via Discover → Save): the
-    // last-used one by IP, else any saved light. With nothing saved, nothing is
-    // selected — so we never show a phantom "press Connect to control …" for a
-    // light that isn't saved.
+    // last-used one by IP, else the first saved light *by name* — a Dictionary's
+    // order is randomized per process, so an unordered `first` could pick a
+    // different light each launch. With nothing saved, nothing is selected — so
+    // we never show a phantom "press Connect to control …" for a light that
+    // isn't saved.
     let lastIp = stores.loadLastIp()
     if !lastIp.isEmpty, let (mac, light) = savedLights.first(where: { $0.value.ip == lastIp }) {
       selectLight(name: light.name, ip: light.ip, mac: mac, persistIp: false)
-    } else if let (mac, light) = savedLights.first {
+    } else if let (mac, light) = savedLights.min(by: { $0.value.name < $1.value.name }) {
       selectLight(name: light.name, ip: light.ip, mac: mac, persistIp: false)
     }
 
@@ -643,18 +645,32 @@ final class AppState: ObservableObject {
     }
   }
 
-  /// Fold the bulb's white channels (`c`/`w`) into the displayed RGB. The engine
-  /// infers control state from r/g/b alone (model.js `parsePilot`), so a colour the
-  /// bulb renders with its white LEDs — a pastel, or anything set from the phone
-  /// app — reads back over-saturated; this recombines them so the swatch and hex
-  /// match what the eye sees. RGB mode only, and a no-op when no white is lit.
-  private func perceivedState(_ parsed: LightState, from result: [String: Any]) -> LightState {
+  /// Fold the bulb's white channels (`c`/`w`) back into the RGB we adopt. The
+  /// engine infers control state from r/g/b alone (model.js `parsePilot`), so a
+  /// colour the bulb renders with its white LEDs reads back wrong without this.
+  /// Two cases:
+  ///
+  /// - **Equal `c`/`w`** — the signature of our own "Brighter colours" split
+  ///   (model.js `rgbToWhiteMixed` always drives both equally): invert it
+  ///   *exactly*, recovering the colour the user picked. This is what keeps
+  ///   read-backs stable — folding the *perceived* colour into `state.rgb` and
+  ///   later re-sending it washed every colour toward pure white (the drift
+  ///   color.js explicitly warns about).
+  /// - **Uneven `c`/`w`** — a foreign sender (e.g. the phone app) weighted the
+  ///   whites separately; that split can't be inverted, so adopt the engine's
+  ///   perceived approximation once. Display and any further edits then both
+  ///   start from what the eye sees, and the next read-back is a fixed point.
+  ///
+  /// RGB mode only, and a no-op when no white is lit.
+  private func foldedState(_ parsed: LightState, from result: [String: Any]) -> LightState {
     guard parsed.mode == .rgb else { return parsed }
     let c = (result["c"] as? NSNumber)?.intValue ?? 0
     let w = (result["w"] as? NSNumber)?.intValue ?? 0
     guard c != 0 || w != 0 else { return parsed }
     var next = parsed
-    next.rgb = core.perceivedRgb(parsed.rgb, c: c, w: w)
+    next.rgb =
+      core.whiteMixedToRgb(parsed.rgb, c: c, w: w)
+      ?? core.perceivedRgb(parsed.rgb, c: c, w: w)
     return next
   }
 
@@ -674,7 +690,7 @@ final class AppState: ObservableObject {
           self.scheduleNextPoll(after: Self.healthPollInterval)
           // Preserve the user's last RGB if the bulb reports white mode (so
           // flipping back to RGB restores their colour rather than white).
-          var next = self.perceivedState(parsed, from: result)
+          var next = self.foldedState(parsed, from: result)
           if next.mode == .white { next.rgb = self.state.rgb }
           // A running scene reports no colour; keep the last one so leaving it restores.
           if next.scene != nil {
@@ -910,7 +926,7 @@ final class AppState: ObservableObject {
           if Date().timeIntervalSince(self.lastLocalEdit) > 3,
             let parsed = self.core.parsePilot(result)
           {
-            var next = self.perceivedState(parsed, from: result)
+            var next = self.foldedState(parsed, from: result)
             if next.mode == .white { next.rgb = self.state.rgb }
             if next.scene != nil {
               next.rgb = self.state.rgb
@@ -971,7 +987,7 @@ final class AppState: ObservableObject {
           self.lastLocalEdit == editToken,
           let result = result, let parsed = self.core.parsePilot(result)
         else { return }
-        var next = self.perceivedState(parsed, from: result)
+        var next = self.foldedState(parsed, from: result)
         if next.mode == .white { next.rgb = self.state.rgb }
         if next.scene != nil {
           next.rgb = self.state.rgb
@@ -992,7 +1008,7 @@ final class AppState: ObservableObject {
     guard let client = client else { return }
     lastLocalEdit = Date()
     let params = core.buildSetPilotParams(state, bounds: deviceBounds(), whiteMix: whiteMix)
-    client.apply(state: state, params: params)
+    client.send(params)
     if state.mode == .rgb { scheduleDeviceRgbSave() }
     bump()
   }
@@ -1095,13 +1111,17 @@ final class AppState: ObservableObject {
   /// Turn the light off *synchronously*, blocking until the datagrams are on the
   /// wire. The normal `setPower(false)` path debounces and sends on a background
   /// queue, but the system can cut Wi-Fi the instant the sleep / terminate
-  /// handler returns — a deferred send would never leave the machine. `sendNow`
-  /// fires the off command 3× (≈240 ms) to ride out UDP loss; the optimistic
-  /// local `state.on = false` keeps the menu-bar icon correct on wake. We send
-  /// regardless of the last-known on/off so a stale "off" can't strand a lit
-  /// bulb. No-op without a selected light.
+  /// handler returns — a deferred send would never leave the machine. Any pending
+  /// debounced send is cancelled first (waiting it out if it's mid-flight), so a
+  /// colour edit from moments before the lid closed can't fire *after* the off
+  /// and turn the light back on. `sendNow` then fires the off command 3×
+  /// (≈240 ms) to ride out UDP loss; the optimistic local `state.on = false`
+  /// keeps the menu-bar icon correct on wake. We send regardless of the
+  /// last-known on/off so a stale "off" can't strand a lit bulb. No-op without a
+  /// selected light.
   private func sendPowerOffNow() {
     guard hasLight, let client = client else { return }
+    client.cancelPendingSync()
     client.sendNow(["state": false])
     state.on = false
     bump()
@@ -1244,7 +1264,8 @@ final class AppState: ObservableObject {
     if mac == selectedMac {
       // Removed the light we're using: clear the selection + disconnect, and forget
       // it as the last-used light, so nothing shows as selected or connected.
-      stores.saveLastIp("")
+      // (`clearLastIp`, not `saveLastIp("")` — the latter guards empty and no-ops.)
+      stores.clearLastIp()
       selectLight(name: "", ip: "", mac: "", persistIp: false, connect: false)
     }
     bump()

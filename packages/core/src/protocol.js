@@ -52,6 +52,9 @@ export function sendPilot(
  * Send a no-param request (`getPilot`, `getModelConfig`, `getSystemConfig`, …)
  * and resolve with the bulb's `result` object, or `null` on timeout or any
  * error. Never rejects — callers treat `null` as "unreachable / unsupported".
+ * Only a datagram *from the queried host* settles the promise — the socket's
+ * ephemeral port is otherwise open to any sender, and a stray (or spoofed)
+ * reply must not be read as the bulb's state.
  */
 export function query(
   host,
@@ -59,6 +62,7 @@ export function query(
   { port = DEFAULT_PORT, timeoutMs = DEFAULT_TIMEOUT_MS, createSocket = defaultCreateSocket } = {},
 ) {
   assertHost(host);
+  const source = host.trim();
   return new Promise((resolve) => {
     const socket = createSocket();
     let settled = false;
@@ -72,7 +76,8 @@ export function query(
 
     const timer = setTimeout(() => finish(null), timeoutMs);
     socket.on('error', () => finish(null));
-    socket.on('message', (msg) => {
+    socket.on('message', (msg, rinfo) => {
+      if (rinfo?.address !== source) return; // not the bulb we asked — keep waiting
       try {
         finish(JSON.parse(msg.toString('utf8')).result ?? null);
       } catch {
@@ -152,7 +157,9 @@ export class WizLight {
    * Every call coalesced into one window shares a single promise that settles
    * when that window's send completes (or resolves early if {@link close}
    * cancels it), so an awaited call never hangs just because a later call
-   * superseded it.
+   * superseded it. A {@link sendNow} issued *after* the window was armed also
+   * supersedes it — the stale payload is dropped (resolved, like a close) so a
+   * debounced edit can't land after a direct send (e.g. a forced power-off).
    */
   send(params) {
     this.#pending = params;
@@ -167,11 +174,16 @@ export class WizLight {
       this.#deferred = { promise, resolve, reject };
     }
     const deferred = this.#deferred;
+    const gen = this.#sendGen; // window-arm generation; a direct send bumps it
     this.#timer = setTimeout(() => {
       this.#timer = null;
       this.#deferred = null;
       const next = this.#pending;
       this.#pending = null;
+      if (gen !== this.#sendGen) {
+        deferred.resolve(); // superseded by a direct sendNow — drop, don't hang
+        return;
+      }
       this.sendNow(next).then(deferred.resolve, deferred.reject);
     }, this.debounceMs);
     return deferred.promise;

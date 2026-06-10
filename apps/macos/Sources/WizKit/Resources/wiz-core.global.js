@@ -62,7 +62,8 @@ var WizCore = (() => {
     stateMatchesPreset: () => stateMatchesPreset,
     toDimming: () => toDimming,
     warmGlowKelvin: () => warmGlowKelvin,
-    wheelToHS: () => wheelToHS
+    wheelToHS: () => wheelToHS,
+    whiteMixedToRgb: () => whiteMixedToRgb
   });
 
   // packages/core/src/color.js
@@ -193,8 +194,8 @@ var WizCore = (() => {
   }
   var clampBrightness = (n) => clampInt(n, 0, 100);
   var clampTemp = (k) => clampInt(k, TEMP_MIN, TEMP_MAX);
-  var SPEED_MIN = 1;
-  var SPEED_MAX = 100;
+  var SPEED_MIN = 10;
+  var SPEED_MAX = 200;
   var clampSpeed = (n) => clampInt(n, SPEED_MIN, SPEED_MAX);
   var toDimming = (brightness) => clampInt(brightness, DIMMING_MIN, DIMMING_MAX);
   var clampRgb = (rgb) => rgb.map((c) => clampInt(c, 0, 255));
@@ -251,6 +252,11 @@ var WizCore = (() => {
   function rgbToWhiteMixed([r, g, b]) {
     const white = Math.min(r, g, b);
     return { r: r - white, g: g - white, b: b - white, c: white, w: white };
+  }
+  function whiteMixedToRgb(rgb, c = 0, w = 0) {
+    if (c !== w) return null;
+    const white = clampInt(c, 0, 255);
+    return clampRgb(rgb.map((channel) => Number(channel) + white));
   }
   function deviceBoundsFromConfig(modelConfig) {
     const bounds = {};
@@ -331,6 +337,7 @@ var WizCore = (() => {
     };
   }
   function stateMatchesPreset(state, preset) {
+    if (!state.on || state.scene) return false;
     if (preset.mode !== state.mode) return false;
     if ((preset.brightness ?? 100) !== state.brightness) return false;
     if (preset.mode === "rgb") {

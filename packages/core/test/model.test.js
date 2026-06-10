@@ -5,6 +5,7 @@ import {
   parsePilot,
   buildSetPilotParams,
   rgbToWhiteMixed,
+  whiteMixedToRgb,
   deviceBoundsFromConfig,
   deviceCapabilities,
   describeDevice,
@@ -212,6 +213,35 @@ describe('model: rgbToWhiteMixed', () => {
   });
 });
 
+describe('model: whiteMixedToRgb', () => {
+  it('exactly inverts rgbToWhiteMixed, so read-backs are stable (no drift)', () => {
+    for (const rgb of [
+      [255, 200, 200],
+      [255, 180, 180],
+      [255, 0, 0],
+      [255, 255, 255],
+      [10, 128, 90],
+    ]) {
+      const { r, g, b, c, w } = rgbToWhiteMixed(rgb);
+      assert.deepEqual(whiteMixedToRgb([r, g, b], c, w), rgb, `round-trips ${rgb}`);
+    }
+  });
+
+  it('is the identity when no white is lit (or the channels are omitted)', () => {
+    assert.deepEqual(whiteMixedToRgb([10, 20, 30], 0, 0), [10, 20, 30]);
+    assert.deepEqual(whiteMixedToRgb([10, 20, 30]), [10, 20, 30]);
+  });
+
+  it('returns null for an uneven split (a foreign sender weights c/w separately)', () => {
+    assert.equal(whiteMixedToRgb([255, 0, 65], 0, 111), null);
+    assert.equal(whiteMixedToRgb([255, 0, 65], 60, 40), null);
+  });
+
+  it('clamps channels that would overflow on a foreign equal split', () => {
+    assert.deepEqual(whiteMixedToRgb([200, 200, 200], 100, 100), [255, 255, 255]);
+  });
+});
+
 describe('model: applyPreset', () => {
   const base = { on: false, mode: 'rgb', rgb: [1, 2, 3], temp: 4000, brightness: 33 };
 
@@ -263,22 +293,42 @@ describe('model: stateMatchesPreset', () => {
 
   it('rejects on a different mode', () => {
     assert.equal(
-      stateMatchesPreset({ mode: 'white', rgb: [255, 0, 0], brightness: 100 }, red),
+      stateMatchesPreset({ on: true, mode: 'white', rgb: [255, 0, 0], brightness: 100 }, red),
       false,
     );
   });
 
   it('rejects on a brightness mismatch', () => {
-    assert.equal(stateMatchesPreset({ mode: 'rgb', rgb: [255, 0, 0], brightness: 40 }, red), false);
+    assert.equal(
+      stateMatchesPreset({ on: true, mode: 'rgb', rgb: [255, 0, 0], brightness: 40 }, red),
+      false,
+    );
   });
 
   it('rejects on any rgb channel mismatch', () => {
     assert.equal(
-      stateMatchesPreset({ mode: 'rgb', rgb: [254, 0, 0], brightness: 100 }, red),
+      stateMatchesPreset({ on: true, mode: 'rgb', rgb: [254, 0, 0], brightness: 100 }, red),
       false,
     );
     assert.equal(
-      stateMatchesPreset({ mode: 'rgb', rgb: [255, 1, 0], brightness: 100 }, red),
+      stateMatchesPreset({ on: true, mode: 'rgb', rgb: [255, 1, 0], brightness: 100 }, red),
+      false,
+    );
+  });
+
+  it('never matches while the light is off (the bulb is not showing the preset)', () => {
+    assert.equal(
+      stateMatchesPreset({ on: false, mode: 'rgb', rgb: [255, 0, 0], brightness: 100 }, red),
+      false,
+    );
+  });
+
+  it('never matches while a dynamic scene is running', () => {
+    assert.equal(
+      stateMatchesPreset(
+        { on: true, mode: 'rgb', rgb: [255, 0, 0], brightness: 100, scene: { id: 4 } },
+        red,
+      ),
       false,
     );
   });
@@ -286,14 +336,14 @@ describe('model: stateMatchesPreset', () => {
   it('defaults a preset without brightness to 100 when comparing', () => {
     assert.equal(
       stateMatchesPreset(
-        { mode: 'white', temp: 3000, brightness: 100 },
+        { on: true, mode: 'white', temp: 3000, brightness: 100 },
         { mode: 'white', temp: 3000 },
       ),
       true,
     );
     assert.equal(
       stateMatchesPreset(
-        { mode: 'white', temp: 3000, brightness: 40 },
+        { on: true, mode: 'white', temp: 3000, brightness: 40 },
         { mode: 'white', temp: 3000 },
       ),
       false,
@@ -302,8 +352,14 @@ describe('model: stateMatchesPreset', () => {
 
   it('compares temperature for white presets', () => {
     const relax = DEFAULT_PRESETS.white.Relax;
-    assert.equal(stateMatchesPreset({ mode: 'white', temp: 3000, brightness: 100 }, relax), true);
-    assert.equal(stateMatchesPreset({ mode: 'white', temp: 3001, brightness: 100 }, relax), false);
+    assert.equal(
+      stateMatchesPreset({ on: true, mode: 'white', temp: 3000, brightness: 100 }, relax),
+      true,
+    );
+    assert.equal(
+      stateMatchesPreset({ on: true, mode: 'white', temp: 3001, brightness: 100 }, relax),
+      false,
+    );
   });
 
   it('matches the corresponding default-preset round trip via applyPreset', () => {
@@ -481,7 +537,13 @@ describe('model: dynamic scenes', () => {
 
   it('buildSetPilotParams clamps an out-of-range scene speed', () => {
     const p = buildSetPilotParams({ on: true, brightness: 100, scene: { id: 4, speed: 999 } });
-    assert.equal(p.speed, 100);
+    assert.equal(p.speed, 200);
+    const q = buildSetPilotParams({ on: true, brightness: 100, scene: { id: 4, speed: 1 } });
+    assert.equal(q.speed, 10);
+  });
+
+  it('parsePilot keeps a reported speed above 100 (the band is 10–200)', () => {
+    assert.equal(parsePilot({ state: true, sceneId: 4, speed: 150 }).scene.speed, 150);
   });
 
   it('a scene still yields { state: false } when off', () => {

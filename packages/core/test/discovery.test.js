@@ -167,6 +167,7 @@ describe('discovery: collecting bulbs', () => {
     const result = await promise;
     assert.equal(result.length, 1);
     assert.equal(result[0].ip, '10.0.0.7');
+    assert.equal(result[0].mac, '', 'mac is an empty string, never undefined');
   });
 
   it('derives name from moduleName, then mac, then address', async () => {

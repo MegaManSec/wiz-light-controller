@@ -12,7 +12,9 @@ import {
 } from '../src/protocol.js';
 import { makeFakeSocket, flush } from './helpers.js';
 
-const HOST = '10.0.0.42';
+// Matches the fake socket's default reply rinfo (helpers.js) — query() ignores
+// datagrams from any other source.
+const HOST = '10.0.0.50';
 
 describe('protocol: constants', () => {
   it('exposes the documented transport defaults', () => {
@@ -97,7 +99,26 @@ describe('protocol: queryPilot', () => {
     const socket = makeFakeSocket();
     const promise = queryPilot(HOST, { createSocket: () => socket });
     await flush();
-    socket.emit('message', Buffer.from(JSON.stringify({ env: 'pro' }), 'utf8'), {});
+    socket.reply(undefined); // a reply from the bulb with no `result` field
+    assert.equal(await promise, null);
+  });
+
+  it('ignores a datagram from a different host (only the bulb settles the query)', async () => {
+    const socket = makeFakeSocket();
+    const promise = queryPilot(HOST, { createSocket: () => socket });
+    await flush();
+    // A stray/spoofed reply from elsewhere on the LAN must not be read as state.
+    socket.reply({ state: false, dimming: 1 }, { address: '10.9.9.9', port: 38899 });
+    socket.reply({ state: true, dimming: 80 });
+    assert.deepEqual(await promise, { state: true, dimming: 80 });
+  });
+
+  it('resolves null on timeout when only foreign datagrams arrive', async () => {
+    const socket = makeFakeSocket();
+    const promise = queryPilot(HOST, { timeoutMs: 1000, createSocket: () => socket });
+    await flush();
+    socket.reply({ state: true }, { address: '10.9.9.9', port: 38899 });
+    mock.timers.tick(1000);
     assert.equal(await promise, null);
   });
 
@@ -350,5 +371,28 @@ describe('protocol: WizLight.send (debounced)', () => {
     mock.timers.tick(1000);
     await flush();
     assert.equal(sockets.length, 0, 'nothing should be transmitted after close');
+  });
+
+  it('a direct sendNow supersedes a pending debounced send (the stale payload is dropped)', async () => {
+    const { light, sockets } = makeLight();
+    // A colour edit is debouncing… then a forced power-off goes out directly
+    // (e.g. the macOS app turning the light off as the Mac sleeps).
+    const debounced = light.send({ state: true, r: 200 });
+    const direct = light.sendNow({ state: false });
+    await flush(); // first off datagram sent, retry gap armed
+    mock.timers.tick(120); // sendNow's retry gap (retries: 2)
+    await flush();
+    await direct;
+    assert.equal(sockets.length, 2, 'the direct send went out in full');
+
+    mock.timers.tick(250); // the stale debounce window elapses…
+    await flush();
+    mock.timers.tick(1000);
+    await flush();
+    await debounced; // …its promise settles (dropped, not failed)
+    assert.equal(sockets.length, 2, 'the stale payload was never transmitted');
+    for (const s of sockets) {
+      assert.deepEqual(s.sent[0].message.params, { state: false }, 'only the off went out');
+    }
   });
 });

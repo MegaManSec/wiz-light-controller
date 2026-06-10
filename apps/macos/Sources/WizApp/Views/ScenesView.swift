@@ -34,15 +34,18 @@ struct SceneSpeedView: View {
         Label("Speed", systemImage: "speedometer")
           .font(.subheadline)
         Spacer()
-        Text("\(app.state.scene?.speed ?? 50)%")
+        // 100% = normal; the bulb only reports a speed once one has been set.
+        Text("\(app.state.scene?.speed ?? 100)%")
           .font(.caption.monospacedDigit())
           .foregroundStyle(.secondary)
       }
       GradientSlider(
         value: Binding(
-          get: { Double(app.state.scene?.speed ?? 50) },
+          get: { Double(app.state.scene?.speed ?? 100) },
           set: { app.setSceneSpeed(Int($0.rounded())) }),
-        range: 1...100,
+        // The engine's firmware band (10–200), so the slider can't drift from
+        // what clampSpeed enforces.
+        range: Double(app.core.speedRange.lowerBound)...Double(app.core.speedRange.upperBound),
         colors: [],
         progressFill: (filled: .accentColor, unfilled: Color(rgb: [90, 90, 90])))
     }

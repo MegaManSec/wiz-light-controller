@@ -12,10 +12,10 @@ import Foundation
 /// fire-and-forget datagrams. Each `WizClient` owns a serial queue; the public
 /// methods are safe to call from the main actor.
 ///
-/// `@unchecked Sendable`: the only mutable state (`pendingParams`,
-/// `debounceWork`) is confined to the private serial `queue`; the query/send
-/// methods (`getPilot`, `sendNow`, `setPilot`) are stateless socket calls. This
-/// lets `AppState` hand the client to a background queue for the blocking
+/// `@unchecked Sendable`: the mutable state is either confined to the private
+/// serial `queue` (`pendingParams`, `debounceWork`) or guarded by `genLock`
+/// (`sendGen`); the query methods (`getPilot` etc.) are stateless socket calls.
+/// This lets `AppState` hand the client to a background queue for the blocking
 /// `getPilot` without tripping Sendable diagnostics.
 public final class WizClient: @unchecked Sendable {
   // MARK: - Tunables (match wiz-light-core's protocol defaults)
@@ -30,11 +30,33 @@ public final class WizClient: @unchecked Sendable {
 
   public let host: String
 
-  /// Serializes coalescing + sends so a burst of `apply`/`power` calls from the
+  /// Serializes coalescing + sends so a burst of `send`/`power` calls from the
   /// UI funnels into a single debounced datagram.
   private let queue = DispatchQueue(label: "com.wizlightcontroller.client")
   private var pendingParams: [String: Any]?
   private var debounceWork: DispatchWorkItem?
+
+  /// Send generation, mirroring the engine `WizLight`'s `#sendGen`: every
+  /// `sendNow` bumps it, each retry iteration re-checks it (so a newer send
+  /// abandons an in-flight retry loop and a stale payload can't land after the
+  /// new one), and a debounced send armed before a direct `sendNow` is dropped
+  /// when its window elapses. Guarded by `genLock` — `sendNow` runs on whatever
+  /// thread called it (main for the sleep power-off, `queue` for debounced sends).
+  private var sendGen = 0
+  private let genLock = NSLock()
+
+  private func bumpGen() -> Int {
+    genLock.lock()
+    defer { genLock.unlock() }
+    sendGen += 1
+    return sendGen
+  }
+
+  private func currentGen() -> Int {
+    genLock.lock()
+    defer { genLock.unlock() }
+    return sendGen
+  }
 
   public init(host: String) {
     self.host = host
@@ -70,7 +92,11 @@ public final class WizClient: @unchecked Sendable {
 
   /// Send a no-param request and return the parsed `result`, or `nil` on a 1s
   /// timeout / any socket error. Never throws. Safe off the main thread (it
-  /// blocks on `recvfrom`).
+  /// blocks on `recvfrom`). Only a datagram *from the queried host* counts —
+  /// the socket's ephemeral port is otherwise open to any sender, and a stray
+  /// (or spoofed) reply must not be read as the bulb's state; foreign datagrams
+  /// are skipped and the receive keeps waiting out the timeout (mirrors the
+  /// engine `query`).
   private func query(method: String, host: String) -> [String: Any]? {
     guard let payload = Self.encode(method: method, params: [:]) else { return nil }
 
@@ -94,14 +120,29 @@ public final class WizClient: @unchecked Sendable {
     guard sent >= 0 else { return nil }
 
     var buf = [UInt8](repeating: 0, count: 4096)
-    let n = recvfrom(fd, &buf, buf.count, 0, nil, nil)
-    guard n > 0 else { return nil }
+    let deadline = Date().addingTimeInterval(Double(Self.timeoutMs) / 1000)
+    while true {
+      var from = sockaddr_in()
+      var fromLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+      let n = withUnsafeMutablePointer(to: &from) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+          recvfrom(fd, &buf, buf.count, 0, sa, &fromLen)
+        }
+      }
+      guard n > 0 else { return nil }  // timeout (EAGAIN) or socket error
+      // Not the bulb we asked — keep waiting (bounded by the deadline, so a
+      // chatty foreign sender can't keep the call alive past the timeout).
+      guard from.sin_addr.s_addr == addr.sin_addr.s_addr else {
+        if Date() >= deadline { return nil }
+        continue
+      }
 
-    let data = Data(buf[0..<n])
-    guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-      return nil
+      let data = Data(buf[0..<n])
+      guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        return nil  // malformed reply from the bulb itself (mirrors the engine)
+      }
+      return obj["result"] as? [String: Any]
     }
-    return obj["result"] as? [String: Any]
   }
 
   /// Send a single `setPilot` datagram (fire-and-forget). The socket is always
@@ -113,8 +154,10 @@ public final class WizClient: @unchecked Sendable {
 
   // MARK: - Stateful, debounced sends (the UI path)
 
-  /// Build the wire params for a desired state and send them debounced.
-  public func apply(state: LightState, params: [String: Any]) {
+  /// Send prebuilt wire params debounced (mirrors the engine `WizLight.send`;
+  /// the params are built by the caller because `buildSetPilotParams` needs the
+  /// device bounds and white-mix choice that live in the app layer).
+  public func send(_ params: [String: Any]) {
     schedule(params)
   }
 
@@ -125,9 +168,13 @@ public final class WizClient: @unchecked Sendable {
 
   /// Send `params` now, repeated `retries` times spaced `retryIntervalMs`, to
   /// survive packet loss. Bypasses the debounce — used internally after the
-  /// window elapses, but public so callers can force an immediate send.
+  /// window elapses, but public so callers can force an immediate send. A newer
+  /// `sendNow` started mid-loop abandons the remaining retries (generation
+  /// guard), so a stale payload can't land after the new one.
   public func sendNow(_ params: [String: Any]) {
+    let gen = bumpGen()
     for i in 0..<Self.retries {
+      if gen != currentGen() { return }  // superseded by a newer send
       Self.sendOnce(method: "setPilot", params: params, host: host)
       if i < Self.retries - 1 {
         usleep(useconds_t(Self.retryIntervalMs * 1000))
@@ -136,15 +183,19 @@ public final class WizClient: @unchecked Sendable {
   }
 
   /// Coalesce: replace any pending payload, (re)arm the debounce timer. Only the
-  /// latest payload in the window is sent — then `sendNow` fans it out 3×.
+  /// latest payload in the window is sent — then `sendNow` fans it out 3×. A
+  /// direct `sendNow` issued after the window was armed supersedes it: the stale
+  /// payload is dropped when the window elapses (mirrors the engine `WizLight`).
   private func schedule(_ params: [String: Any]) {
     queue.async { [weak self] in
       guard let self = self else { return }
       self.pendingParams = params
       self.debounceWork?.cancel()
+      let gen = self.currentGen()  // window-arm generation; a direct send bumps it
       let work = DispatchWorkItem { [weak self] in
         guard let self = self, let next = self.pendingParams else { return }
         self.pendingParams = nil
+        guard gen == self.currentGen() else { return }  // superseded — drop the stale payload
         self.sendNow(next)
       }
       self.debounceWork = work
@@ -158,6 +209,20 @@ public final class WizClient: @unchecked Sendable {
       self?.debounceWork?.cancel()
       self?.debounceWork = nil
       self?.pendingParams = nil
+    }
+  }
+
+  /// Cancel any pending debounced send and *wait* until nothing is in flight on
+  /// the client queue. Used before a forced power-off at sleep/shutdown: a
+  /// debounced colour edit from moments earlier must not fire after the off.
+  /// Blocks the caller for at most one in-progress `sendNow` (~240 ms). Never
+  /// call from the client queue itself (it would deadlock); the app calls it
+  /// from the main actor only.
+  public func cancelPendingSync() {
+    queue.sync {
+      debounceWork?.cancel()
+      debounceWork = nil
+      pendingParams = nil
     }
   }
 

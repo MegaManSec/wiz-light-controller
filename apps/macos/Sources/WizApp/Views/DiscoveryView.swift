@@ -37,7 +37,9 @@ struct DiscoveryView: View {
               .foregroundStyle(.secondary)
               .listRowSeparator(.hidden)
           }
-          ForEach(unsavedDiscovered, id: \.mac) { light in
+          // Identified by the whole value, not `\.mac` — replies without a MAC
+          // all carry `""` there, which would collide as ForEach ids.
+          ForEach(unsavedDiscovered, id: \.self) { light in
             discoveredRow(light)
               .listRowSeparator(.hidden)
           }

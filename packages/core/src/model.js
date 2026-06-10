@@ -128,6 +128,27 @@ export function rgbToWhiteMixed([r, g, b]) {
 }
 
 /**
+ * Exact inverse of {@link rgbToWhiteMixed}: reconstruct the original colour from
+ * wire channels whose achromatic part rides the white LEDs. Only our own split
+ * is invertible — it always drives both white channels equally — so a pilot with
+ * `c !== w` (e.g. a colour set by the official app, which weights cool/warm
+ * separately) returns `null` and display callers fall back to
+ * {@link perceivedRgb}. Inverting — rather than folding the *perceived* colour
+ * back into the state — keeps read-backs stable: perceived values are
+ * display-only and wash toward white if ever re-sent.
+ *
+ * @param {[number, number, number]} rgb  chromatic remainder channels (0–255)
+ * @param {number} [c]  cool-white channel value
+ * @param {number} [w]  warm-white channel value
+ * @returns {[number, number, number]|null}
+ */
+export function whiteMixedToRgb(rgb, c = 0, w = 0) {
+  if (c !== w) return null;
+  const white = clampInt(c, 0, 255);
+  return clampRgb(rgb.map((channel) => Number(channel) + white));
+}
+
+/**
  * Derive per-device send bounds from a `getModelConfig` result: the bulb's real
  * white range (`cctRange`) and dimming floor (`minDimLevel`). Returns a `bounds`
  * object for {@link buildSetPilotParams}; unknown fields are omitted so the
@@ -284,8 +305,11 @@ export function applyPreset(state, preset) {
   };
 }
 
-/** True when `state` already reflects `preset` (used to highlight the active preset). */
+/** True when `state` already reflects `preset` (used to highlight the active
+ *  preset). Never matches while the light is off or a dynamic scene is running —
+ *  the bulb isn't showing the preset then, whatever the remembered colour says. */
 export function stateMatchesPreset(state, preset) {
+  if (!state.on || state.scene) return false;
   if (preset.mode !== state.mode) return false;
   if ((preset.brightness ?? 100) !== state.brightness) return false;
   if (preset.mode === 'rgb') {

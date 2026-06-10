@@ -13,6 +13,7 @@ import {
   parsePilot,
   buildSetPilotParams,
   applyPreset,
+  whiteMixedToRgb,
   findScene,
   scenesForDevice,
   sceneName,
@@ -41,16 +42,34 @@ const fail = (message) => {
 
 // ---------- shared resolution helpers ----------
 
+/** A string *shaped* like a dotted-quad (even when out of range, e.g.
+ *  `10.0.0.999`) — so a mistyped IP fails loudly instead of being silently
+ *  read as the command's argument. */
+const looksLikeIp = (value) =>
+  typeof value === 'string' && /^\d{1,3}(\.\d{1,3}){3}$/.test(value.trim());
+
 /**
- * Resolve the target bulb IP: explicit positional first, else the last-used IP
- * from the store. Validates and throws a clear message when neither is usable.
+ * Resolve the target bulb and the command's remaining arguments. The leading
+ * positional is taken as the IP only when it actually parses as one; otherwise
+ * every positional is an argument and the last-used IP applies — the documented
+ * "`<ip>` is optional everywhere" behaviour (`wiz color ff0000` works against
+ * the remembered bulb). A positional merely *shaped* like an IP still fails
+ * loudly rather than being misread as an argument.
  */
-async function resolveIp(positional, stores) {
-  const ip = positional ?? (await stores.lastState.loadIp());
+async function resolveTarget(positionals, stores) {
+  const [first] = positionals;
+  if (isValidIp(first)) return { ip: first.trim(), args: positionals.slice(1) };
+  if (looksLikeIp(first)) fail(`Not a valid IPv4 address: ${first}`);
+  const ip = await stores.lastState.loadIp();
   if (!ip) fail('No IP given and no previous bulb remembered. Pass an <ip> (e.g. 10.0.0.5).');
-  if (!isValidIp(ip)) fail(`Not a valid IPv4 address: ${ip}`);
-  return ip;
+  return { ip, args: positionals };
 }
+
+/** Commands with a fixed argument shape reject leftovers instead of silently
+ *  ignoring them (e.g. a typo'd IP that fell through to the argument list). */
+const rejectExtraArgs = (args) => {
+  if (args.length) fail(`Unexpected argument: ${args[0]}`);
+};
 
 /** Parse and validate the optional `--brightness` flag, or return undefined. */
 function parseBrightness(values) {
@@ -80,9 +99,11 @@ function parseSpeed(values) {
 function parsePositiveInt(value, label) {
   if (value === undefined) return undefined;
   if (typeof value !== 'string') fail(`--${label} needs a positive number.`);
-  const n = Number(value);
+  // Floor before the bounds check, so a fractional value below 1 (e.g. 0.5,
+  // which floors to 0) is rejected rather than passed through as 0.
+  const n = Math.floor(Number(value));
   if (!Number.isFinite(n) || n <= 0) fail(`--${label} must be a positive number.`);
-  return Math.floor(n);
+  return n;
 }
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -127,10 +148,13 @@ function formatState(ip, state, result = {}) {
   } else {
     lines.push(`  mode        ${state.mode}`);
     if (state.mode === 'rgb') {
-      // Fold the bulb's white channels (c/w) in so the swatch matches what the eye
-      // sees (and the official app), not just the raw colour LEDs.
-      const rgb = perceivedRgb(state.rgb, result.c, result.w);
-      lines.push(`  colour      ${swatch(rgb)} ${rgbToHex(rgb)}`);
+      // Fold the bulb's white channels (c/w) in so the swatch matches what the
+      // eye sees: an equal c/w split is our own white-mix and inverts exactly to
+      // the colour that was set; anything else gets the perceived approximation.
+      const rgb =
+        whiteMixedToRgb(state.rgb, result.c, result.w) ??
+        perceivedRgb(state.rgb, result.c, result.w);
+      lines.push(`  colour      ${joinParts(swatch(rgb), rgbToHex(rgb))}`);
     } else {
       lines.push(`  temperature ${state.temp}K`);
     }
@@ -139,11 +163,15 @@ function formatState(ip, state, result = {}) {
   return lines.join('\n');
 }
 
+/** Join already-styled fragments with single spaces, skipping empty ones (the
+ *  swatch is `''` when colour is off, which would otherwise leave a gap). */
+const joinParts = (...parts) => parts.filter(Boolean).join(' ');
+
 function presetLine(name, p) {
   const at = `@ ${p.brightness ?? 100}%`;
   if (p.mode === 'white') return `  ${cyan(name)} — ${p.temp}K ${at}`;
   const rgb = [p.r, p.g, p.b];
-  return `  ${swatch(rgb)} ${cyan(name)} — ${rgbToHex(rgb)} ${at}`;
+  return `  ${joinParts(swatch(rgb), cyan(name))} — ${rgbToHex(rgb)} ${at}`;
 }
 
 // ---------- commands ----------
@@ -164,12 +192,15 @@ async function cmdDiscover({ values }) {
     return;
   }
   for (const l of lights) {
-    print(`${bold(l.name)} — ${l.ip} — ${dim(formatMac(l.mac))}`);
+    // A reply can omit the MAC; skip the segment rather than printing a blank.
+    const mac = l.mac ? ` — ${dim(formatMac(l.mac))}` : '';
+    print(`${bold(l.name)} — ${l.ip}${mac}`);
   }
 }
 
 async function cmdStatus({ positionals, stores }) {
-  const ip = await resolveIp(positionals[0], stores);
+  const { ip, args } = await resolveTarget(positionals, stores);
+  rejectExtraArgs(args);
   // Keep the raw result (not just the parsed state) so the swatch can fold in the
   // bulb's white channels (c/w) for a true-to-eye colour.
   const result = await queryWithRetry(ip);
@@ -182,7 +213,8 @@ async function cmdStatus({ positionals, stores }) {
 const powerCommand =
   (on) =>
   async ({ positionals, stores }) => {
-    const ip = await resolveIp(positionals[0], stores);
+    const { ip, args } = await resolveTarget(positionals, stores);
+    rejectExtraArgs(args);
     // One-shot: send immediately rather than via the debounced `power()` path.
     await light(ip).sendNow({ state: on });
     await stores.lastState.saveIp(ip);
@@ -190,8 +222,7 @@ const powerCommand =
   };
 
 async function cmdColor({ positionals, values, stores }) {
-  const ip = await resolveIp(positionals[0], stores);
-  const rest = positionals.slice(1);
+  const { ip, args: rest } = await resolveTarget(positionals, stores);
   if (rest.length === 0) fail('Give a colour: a hex string or three 0-255 values.');
 
   let rgb;
@@ -218,13 +249,16 @@ async function cmdColor({ positionals, values, stores }) {
   );
   await light(ip).sendNow(params);
   await stores.lastState.saveIp(ip);
-  print(`${bold(ip)} set to ${swatch(rgb)} ${rgbToHex(rgb)} @ ${brightness}%`);
+  print(`${bold(ip)} set to ${joinParts(swatch(rgb), rgbToHex(rgb))} @ ${brightness}%`);
 }
 
 async function cmdTemp({ positionals, values, stores }) {
-  const ip = await resolveIp(positionals[0], stores);
-  const kelvin = Number(positionals[1]);
-  if (!Number.isFinite(kelvin)) fail('Give a colour temperature in Kelvin (e.g. 4000).');
+  const { ip, args } = await resolveTarget(positionals, stores);
+  if (args.length > 1) rejectExtraArgs(args.slice(1));
+  const kelvin = Number(args[0]);
+  if (args.length === 0 || !Number.isFinite(kelvin)) {
+    fail('Give a colour temperature in Kelvin (e.g. 4000).');
+  }
 
   const brightness = parseBrightness(values) ?? DEFAULT_STATE.brightness;
   const bounds = await deviceBounds(ip);
@@ -238,9 +272,10 @@ async function cmdTemp({ positionals, values, stores }) {
 }
 
 async function cmdBrightness({ positionals, stores }) {
-  const ip = await resolveIp(positionals[0], stores);
-  if (positionals[1] === undefined) fail('Give a brightness from 0 to 100.');
-  const value = Number(positionals[1]);
+  const { ip, args } = await resolveTarget(positionals, stores);
+  if (args.length > 1) rejectExtraArgs(args.slice(1));
+  if (args[0] === undefined) fail('Give a brightness from 0 to 100.');
+  const value = Number(args[0]);
   if (!Number.isFinite(value) || value < 0 || value > 100) {
     fail('Brightness must be a number from 0 to 100.');
   }
@@ -267,7 +302,8 @@ async function cmdPresets({ values, stores }) {
     ['White', presets.white],
   ];
   for (const [label, group] of groups) {
-    const entries = Object.entries(group ?? {});
+    // Sorted by name — the same stable order the macOS app shows.
+    const entries = Object.entries(group ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
     if (entries.length === 0) continue;
     print(bold(label));
     for (const [name, p] of entries) print(presetLine(name, p));
@@ -275,8 +311,9 @@ async function cmdPresets({ values, stores }) {
 }
 
 async function cmdPreset({ positionals, values, stores }) {
-  const ip = await resolveIp(positionals[0], stores);
-  const name = positionals[1];
+  const { ip, args } = await resolveTarget(positionals, stores);
+  // Join the rest so a multi-word name ("Full White") works even unquoted.
+  const name = args.join(' ').trim();
   if (!name) fail('Give a preset name (see `wiz presets`).');
 
   const presets = await stores.presets.load();
@@ -301,9 +338,12 @@ async function liveStateOrDefault(ip) {
 
 async function cmdScenes({ positionals, values, stores }) {
   // scenesForDevice(null) returns every scene, so an unreachable/omitted bulb still
-  // lists them; a reachable one narrows to what it can actually show.
-  const ip = positionals[0] ?? (await stores.lastState.loadIp());
-  const model = ip && isValidIp(ip) ? await getModelConfig(ip) : null;
+  // lists them; a reachable one narrows to what it can actually show. An explicit
+  // positional must be an IP — a typo'd one fails rather than silently listing all.
+  const [first] = positionals;
+  if (first !== undefined && !isValidIp(first)) fail(`Not a valid IPv4 address: ${first}`);
+  const ip = first ?? (await stores.lastState.loadIp());
+  const model = ip ? await getModelConfig(ip) : null;
   const list = scenesForDevice(model);
   if (values.json) {
     print(JSON.stringify(list, null, 2));
@@ -316,9 +356,9 @@ async function cmdScenes({ positionals, values, stores }) {
 }
 
 async function cmdScene({ positionals, values, stores }) {
-  const ip = await resolveIp(positionals[0], stores);
+  const { ip, args } = await resolveTarget(positionals, stores);
   // Join the rest so a multi-word name ("Pastel Colors") works even unquoted.
-  const wanted = positionals.slice(1).join(' ').trim();
+  const wanted = args.join(' ').trim();
   if (!wanted) fail('Give a scene name or id (see `wiz scenes`).');
   const scene = findScene(wanted);
   if (!scene) fail(`Unknown scene: ${wanted}. Run \`wiz scenes\` to list them.`);
@@ -354,8 +394,9 @@ async function cmdLights({ values, stores }) {
 }
 
 async function cmdSave({ positionals, stores }) {
-  const ip = await resolveIp(positionals[0], stores);
-  const name = positionals[1];
+  const { ip, args } = await resolveTarget(positionals, stores);
+  // Join the rest so a multi-word name ("Living Room") works even unquoted.
+  const name = args.join(' ').trim();
   if (!name) fail('Give a name to save this light under (e.g. `wiz save 10.0.0.5 Desk`).');
 
   const result = await queryWithRetry(ip);

@@ -16,7 +16,8 @@ export const yellow = wrap(33, 39);
 export const cyan = wrap(36, 39);
 export const gray = wrap(90, 39);
 
-/** A filled swatch in 24-bit colour, falling back to a hex label when colour is off. */
+/** A filled swatch in 24-bit colour, or `''` when colour is off — callers print
+ *  the hex label alongside (and skip the empty fragment when composing). */
 export function swatch([r, g, b]) {
   if (!colorEnabled) return '';
   return `[48;2;${r};${g};${b}m  [49m`;

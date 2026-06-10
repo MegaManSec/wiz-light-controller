@@ -66,7 +66,10 @@ export const COMMANDS = {
   preset: {
     summary: 'Apply a named preset',
     usage: 'wiz preset [<ip>] <name> [--brightness <0-100>]',
-    details: ['Looks the name up across the RGB and white preset groups.'],
+    details: [
+      'Looks the name up across the RGB and white preset groups. Multi-word',
+      'names ("Full White") work unquoted.',
+    ],
   },
   scenes: {
     summary: 'List the bulb’s dynamic scenes',
@@ -78,11 +81,11 @@ export const COMMANDS = {
   },
   scene: {
     summary: 'Run a dynamic scene',
-    usage: 'wiz scene [<ip>] <name|id> [--speed <1-100>] [--brightness <0-100>]',
+    usage: 'wiz scene [<ip>] <name|id> [--speed <10-200>] [--brightness <0-100>]',
     details: [
       'Accepts a scene name (case-insensitive) or its id — see `wiz scenes`.',
       '',
-      '  --speed <1-100>       Animation speed (default: keep the bulb’s current)',
+      '  --speed <10-200>       Animation speed, 100 = normal (default: keep the bulb’s current)',
       '  --brightness <0-100>   Brightness percent',
       '',
       'Examples:',
@@ -97,7 +100,10 @@ export const COMMANDS = {
   save: {
     summary: 'Save a bulb by name',
     usage: 'wiz save [<ip>] <name>',
-    details: ['Resolves the bulb’s MAC and stores it for later reference.'],
+    details: [
+      'Resolves the bulb’s MAC and stores it for later reference. Multi-word',
+      'names ("Living Room") work unquoted.',
+    ],
   },
 };
 

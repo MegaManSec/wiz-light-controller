@@ -17,22 +17,25 @@ wiz discover                       find WiZ bulbs on your LAN
 wiz status [ip]                    show a bulb's current state
 wiz on [ip]                        turn a bulb on
 wiz off [ip]                       turn a bulb off
-wiz color <#rrggbb | r g b> [ip]   set an RGB colour
-wiz temp <kelvin> [ip]             set white temperature
-wiz brightness <0-100> [ip]        set brightness
+wiz color [ip] <#rrggbb | r g b>   set an RGB colour
+wiz temp [ip] <kelvin>             set white temperature
+wiz brightness [ip] <0-100>        set brightness
 wiz presets                        list the saved presets
-wiz preset <name> [ip]             apply a preset
+wiz preset [ip] <name>             apply a preset
+wiz scenes [ip]                    list the bulb's dynamic scenes
+wiz scene [ip] <name|id>           run a dynamic scene
 wiz lights                         list saved lights
-wiz save <name> [ip]               save the current light under a name
+wiz save [ip] <name>               save the current light under a name
 ```
 
-`[ip]` is optional and falls back to the last-used bulb. Run `wiz --help`, or `wiz <command> --help`, for details.
+A leading `[ip]` is optional everywhere and falls back to the last-used bulb. Run `wiz --help`, or `wiz <command> --help`, for details.
 
 ## Example
 
 ```bash
 wiz discover
-wiz color "#ff0080" 192.168.1.50
+wiz color 192.168.1.50 "#ff0080"
 wiz temp 2700
 wiz brightness 60
+wiz scene party --speed 120
 ```

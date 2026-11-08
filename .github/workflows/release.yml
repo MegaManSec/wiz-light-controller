@@ -30,6 +30,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: npm # must match the environment on the npm trusted publishers
     # Surfaced so the macOS job below runs only when a release was actually cut.
     outputs:
       version: ${{ steps.gate.outputs.version }}

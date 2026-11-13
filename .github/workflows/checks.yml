@@ -2,9 +2,11 @@ name: Checks
 
 on:
   pull_request:
+    paths-ignore: ['**.md', 'LICENSE']
   push:
     branches:
       - main
+    paths-ignore: ['**.md', 'LICENSE']
 
 # No ambient token: each job opts back in to exactly what it needs.
 permissions: {}

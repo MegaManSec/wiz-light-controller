@@ -18,6 +18,7 @@ on:
   # the version gate no-ops pushes that don't change it.
   push:
     branches: [main]
+    paths-ignore: ['**.md', 'LICENSE']
 
 # Serialise releases; never cancel one mid-publish.
 concurrency:
